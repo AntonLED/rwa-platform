@@ -1,0 +1,20 @@
+[package]
+name = "rwa-token"
+version = "0.1.0"
+description = "RWA Platform — Token-2022 + KYC Transfer Hook (AFSA/AIFC)"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "rwa_token"
+
+[features]
+no-entrypoint = []
+no-idl = []
+no-log-ix-name = []
+cpi = ["no-entrypoint"]
+default = []
+
+[dependencies]
+anchor-lang = { version = "0.31.0", features = ["init-if-needed"] }
+anchor-spl = { version = "0.31.0", features = ["token_2022", "token_2022_extensions"] }

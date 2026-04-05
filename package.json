@@ -1,0 +1,21 @@
+{
+  "name": "rwa-platform",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "backend",
+    "frontend"
+  ],
+  "scripts": {
+    "build:program": "anchor build",
+    "test:program": "anchor test",
+    "dev:backend": "yarn workspace backend dev",
+    "dev:frontend": "yarn workspace frontend dev",
+    "copy-idl": "cp target/idl/rwa_token.json frontend/src/idl/ && cp target/idl/rwa_token.json backend/src/idl/"
+  },
+  "devDependencies": {
+    "@coral-xyz/anchor": "^0.31.0",
+    "@types/node": "^20.0.0",
+    "typescript": "^5.4.0"
+  }
+}
