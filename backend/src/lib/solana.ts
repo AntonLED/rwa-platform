@@ -10,12 +10,15 @@ import {
   Wallet,
   BN,
 } from "@coral-xyz/anchor";
-import * as bs58 from "bs58";
+import {
+  TOKEN_2022_PROGRAM_ID,
+  createMint,
+  getAssociatedTokenAddressSync,
+} from "@solana/spl-token";
 import * as fs from "fs";
 import * as path from "path";
 
 // Загружаем IDL после `anchor build`
-// Пока используем any, до первого билда
 let idl: any;
 try {
   idl = JSON.parse(
@@ -26,12 +29,15 @@ try {
 }
 
 const PROGRAM_ID = new PublicKey(
-  process.env.PROGRAM_ID ?? "RWATo1111111111111111111111111111111111111111"
+  process.env.PROGRAM_ID ?? "J5zLwZs3qmKv69Xd2eGmvbGf8PuCtKD5bh22dm9iZHre"
 );
 
+// ── PDA seeds ─────────────────────────────────────────────────────────────
 export const WHITELIST_REGISTRY_SEED = Buffer.from("whitelist_registry");
 export const WHITELIST_ENTRY_SEED = Buffer.from("whitelist_entry");
 export const INVOICE_SEED = Buffer.from("invoice");
+export const POOL_CONFIG_SEED = Buffer.from("pool_config");
+export const INVESTOR_SEED = Buffer.from("investor");
 
 // ── Синглтон connection + program ──────────────────────────────────────────
 let _program: Program | null = null;
@@ -63,9 +69,15 @@ export function getProgram(): Program {
     const provider = new AnchorProvider(connection, wallet, {
       commitment: "confirmed",
     });
-    _program = new Program(idl, PROGRAM_ID, provider);
+    _program = new Program(idl, provider);
   }
   return _program;
+}
+
+function getUsdtMint(): PublicKey {
+  const mint = process.env.USDT_MINT;
+  if (!mint) throw new Error("USDT_MINT not set");
+  return new PublicKey(mint);
 }
 
 // ── PDA helpers ────────────────────────────────────────────────────────────
@@ -91,7 +103,24 @@ export function getInvoicePDA(invoiceId: string): [PublicKey, number] {
   );
 }
 
-// ── On-chain операции ──────────────────────────────────────────────────────
+export function getPoolConfigPDA(riskLevel: number): [PublicKey, number] {
+  return PublicKey.findProgramAddressSync(
+    [POOL_CONFIG_SEED, Buffer.from([riskLevel])],
+    PROGRAM_ID
+  );
+}
+
+export function getInvestorPositionPDA(
+  invoiceId: string,
+  wallet: PublicKey
+): [PublicKey, number] {
+  return PublicKey.findProgramAddressSync(
+    [INVESTOR_SEED, Buffer.from(invoiceId), wallet.toBuffer()],
+    PROGRAM_ID
+  );
+}
+
+// ── On-chain операции: Whitelist ──────────────────────────────────────────
 
 export async function addToWhitelist(
   wallet: PublicKey,
@@ -148,4 +177,200 @@ export async function getWhitelistEntry(wallet: PublicKey) {
   } catch {
     return null;
   }
+}
+
+// ── On-chain операции: Pool ───────────────────────────────────────────────
+
+export async function initializePool(
+  riskLevel: number,
+  baseRateBps: number,
+  markupBps: number
+): Promise<string> {
+  const program = getProgram();
+  const [poolConfigPDA] = getPoolConfigPDA(riskLevel);
+  const backendKeypair = getBackendKeypair();
+
+  const tx = await program.methods
+    .initializePool(riskLevel, baseRateBps, markupBps)
+    .accounts({
+      poolConfig: poolConfigPDA,
+      authority: backendKeypair.publicKey,
+      systemProgram: SystemProgram.programId,
+    })
+    .signers([backendKeypair])
+    .rpc();
+
+  return tx;
+}
+
+export async function getPoolConfig(riskLevel: number) {
+  const program = getProgram();
+  const [poolConfigPDA] = getPoolConfigPDA(riskLevel);
+  try {
+    return await (program.account as any).poolConfig.fetch(poolConfigPDA);
+  } catch {
+    return null;
+  }
+}
+
+// ── On-chain операции: Invoice ────────────────────────────────────────────
+
+export async function createInvoice(
+  invoiceId: string,
+  totalAmount: number,
+  creditor: PublicKey,
+  debtor: PublicKey,
+  dueDate: number,
+  interestRateBps: number,
+  riskLevel: number,
+  documentHash: Uint8Array
+): Promise<{ tx: string; mint: PublicKey }> {
+  const program = getProgram();
+  const connection = getConnection();
+  const backendKeypair = getBackendKeypair();
+  const [invoicePDA] = getInvoicePDA(invoiceId);
+  const [poolConfigPDA] = getPoolConfigPDA(riskLevel);
+
+  // Create Token-2022 mint with invoice PDA as mint authority
+  const invoiceMint = await createMint(
+    connection,
+    backendKeypair,
+    invoicePDA, // mint authority = invoice PDA
+    null, // no freeze authority
+    6, // INVOICE_TOKEN_DECIMALS
+    undefined,
+    { commitment: "confirmed" },
+    TOKEN_2022_PROGRAM_ID
+  );
+
+  const tx = await program.methods
+    .createInvoice(
+      invoiceId,
+      new BN(totalAmount),
+      creditor,
+      debtor,
+      new BN(dueDate),
+      interestRateBps,
+      riskLevel,
+      Array.from(documentHash)
+    )
+    .accounts({
+      invoice: invoicePDA,
+      poolConfig: poolConfigPDA,
+      invoiceMint: invoiceMint,
+      authority: backendKeypair.publicKey,
+      systemProgram: SystemProgram.programId,
+    })
+    .signers([backendKeypair])
+    .rpc();
+
+  return { tx, mint: invoiceMint };
+}
+
+export async function advanceToCreditor(invoiceId: string): Promise<string> {
+  const program = getProgram();
+  const backendKeypair = getBackendKeypair();
+  const [invoicePDA] = getInvoicePDA(invoiceId);
+  const usdtMint = getUsdtMint();
+
+  // Fetch invoice to get creditor
+  const invoice = await (program.account as any).invoiceAccount.fetch(invoicePDA);
+
+  // Vault is ATA of invoice PDA for USDT (Token-2022)
+  const invoiceVault = getAssociatedTokenAddressSync(
+    usdtMint,
+    invoicePDA,
+    true, // allowOwnerOffCurve (PDA)
+    TOKEN_2022_PROGRAM_ID
+  );
+
+  const creditorUsdt = getAssociatedTokenAddressSync(
+    usdtMint,
+    invoice.creditor,
+    true,
+    TOKEN_2022_PROGRAM_ID
+  );
+
+  const tx = await program.methods
+    .advanceToCreditor(invoiceId)
+    .accounts({
+      invoice: invoicePDA,
+      usdtMint: usdtMint,
+      invoiceVault: invoiceVault,
+      creditorUsdt: creditorUsdt,
+      authority: backendKeypair.publicKey,
+      tokenProgram: TOKEN_2022_PROGRAM_ID,
+    })
+    .signers([backendKeypair])
+    .rpc();
+
+  return tx;
+}
+
+export async function settleInvoice(invoiceId: string): Promise<string> {
+  const program = getProgram();
+  const backendKeypair = getBackendKeypair();
+  const [invoicePDA] = getInvoicePDA(invoiceId);
+  const usdtMint = getUsdtMint();
+
+  const invoiceVault = getAssociatedTokenAddressSync(
+    usdtMint,
+    invoicePDA,
+    true,
+    TOKEN_2022_PROGRAM_ID
+  );
+
+  const authorityUsdt = getAssociatedTokenAddressSync(
+    usdtMint,
+    backendKeypair.publicKey,
+    false,
+    TOKEN_2022_PROGRAM_ID
+  );
+
+  const tx = await program.methods
+    .settleInvoice(invoiceId)
+    .accounts({
+      invoice: invoicePDA,
+      usdtMint: usdtMint,
+      invoiceVault: invoiceVault,
+      authorityUsdt: authorityUsdt,
+      authority: backendKeypair.publicKey,
+      tokenProgram: TOKEN_2022_PROGRAM_ID,
+    })
+    .signers([backendKeypair])
+    .rpc();
+
+  return tx;
+}
+
+export async function markDefault(invoiceId: string): Promise<string> {
+  const program = getProgram();
+  const backendKeypair = getBackendKeypair();
+  const [invoicePDA] = getInvoicePDA(invoiceId);
+
+  const tx = await program.methods
+    .markDefault(invoiceId)
+    .accounts({
+      invoice: invoicePDA,
+      authority: backendKeypair.publicKey,
+    })
+    .signers([backendKeypair])
+    .rpc();
+
+  return tx;
+}
+
+export async function getInvoice(invoiceId: string) {
+  const program = getProgram();
+  const [invoicePDA] = getInvoicePDA(invoiceId);
+  try {
+    return await (program.account as any).invoiceAccount.fetch(invoicePDA);
+  } catch {
+    return null;
+  }
+}
+
+export async function getAllInvoices() {
+  const program = getProgram();
+  return await (program.account as any).invoiceAccount.all();
 }
