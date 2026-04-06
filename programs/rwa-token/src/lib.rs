@@ -1,10 +1,12 @@
+#![allow(unexpected_cfgs)]
+
 use anchor_lang::prelude::*;
 use anchor_spl::token_interface::{
     burn, mint_to, transfer_checked, Burn, Mint, MintTo, TokenAccount, TokenInterface,
     TransferChecked,
 };
 
-declare_id!("J5zLwZs3qmKv69Xd2eGmvbGf8PuCtKD5bh22dm9iZHre");
+declare_id!("GH9TPWVqa4UVNARHFBXadN5uwLMrhtE6obaHC9LFCKFz");
 
 // ── Seeds ──────────────────────────────────────────────────────────────────
 pub const WHITELIST_REGISTRY_SEED: &[u8] = b"whitelist_registry";
@@ -162,7 +164,10 @@ pub mod rwa_token {
 
         // Update pool stats
         let pool = &mut ctx.accounts.pool_config;
-        pool.total_invoices = pool.total_invoices.checked_add(1).ok_or(RwaError::Overflow)?;
+        pool.total_invoices = pool
+            .total_invoices
+            .checked_add(1)
+            .ok_or(RwaError::Overflow)?;
 
         emit!(InvoiceCreated {
             invoice_id,
@@ -189,7 +194,10 @@ pub mod rwa_token {
         let invoice_bump = ctx.accounts.invoice.bump;
         let invoice_id_stored = ctx.accounts.invoice.invoice_id.clone();
 
-        require!(invoice_status == InvoiceStatus::Funding, RwaError::InvalidStatus);
+        require!(
+            invoice_status == InvoiceStatus::Funding,
+            RwaError::InvalidStatus
+        );
 
         let remaining = total_amount
             .checked_sub(funded_amount)
@@ -212,7 +220,8 @@ pub mod rwa_token {
         )?;
 
         // Mint invoice tokens to investor (PDA signs as mint authority)
-        let signer_seeds: &[&[&[u8]]] = &[&[INVOICE_SEED, invoice_id_stored.as_bytes(), &[invoice_bump]]];
+        let signer_seeds: &[&[&[u8]]] =
+            &[&[INVOICE_SEED, invoice_id_stored.as_bytes(), &[invoice_bump]]];
 
         mint_to(
             CpiContext::new(
@@ -276,7 +285,8 @@ pub mod rwa_token {
             .ok_or(RwaError::Overflow)?;
 
         // Transfer USDT from vault to creditor (invoice PDA signs)
-        let signer_seeds: &[&[&[u8]]] = &[&[INVOICE_SEED, invoice_id_stored.as_bytes(), &[invoice_bump]]];
+        let signer_seeds: &[&[&[u8]]] =
+            &[&[INVOICE_SEED, invoice_id_stored.as_bytes(), &[invoice_bump]]];
 
         transfer_checked(
             CpiContext::new(

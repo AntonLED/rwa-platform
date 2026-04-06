@@ -3,7 +3,7 @@ import { WalletMultiButton } from "@solana/wallet-adapter-react-ui";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useRole, Role } from "../../hooks/useRole";
 import WalletStatus from "../WalletStatus";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import KycOnboarding from "../KycOnboarding";
 
 const NAV: { path: string; label: string; role: Role }[] = [
@@ -18,6 +18,7 @@ export default function Header() {
   const location = useLocation();
   const navigate = useNavigate();
   const [showKyc, setShowKyc] = useState(false);
+  const refetchWhitelistRef = useRef<(() => void) | null>(null);
 
   return (
     <header style={{ borderBottom: "1px solid #e0e0e0", paddingBottom: 12, marginBottom: 24 }}>
@@ -73,7 +74,7 @@ export default function Header() {
 
       {publicKey && (
         <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-          <WalletStatus wallet={publicKey.toBase58()} />
+          <WalletStatus wallet={publicKey.toBase58()} onRefetchReady={(fn) => { refetchWhitelistRef.current = fn; }} />
           <button
             onClick={() => setShowKyc(!showKyc)}
             style={{
@@ -91,7 +92,7 @@ export default function Header() {
         </div>
       )}
       {showKyc && publicKey && (
-        <KycOnboarding wallet={publicKey.toBase58()} />
+        <KycOnboarding wallet={publicKey.toBase58()} onKycComplete={() => refetchWhitelistRef.current?.()} />
       )}
     </header>
   );

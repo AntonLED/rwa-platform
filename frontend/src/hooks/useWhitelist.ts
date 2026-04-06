@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 export interface WhitelistStatus {
   whitelisted: boolean;
@@ -11,6 +11,9 @@ export interface WhitelistStatus {
 export function useWhitelist(wallet: string | null) {
   const [status, setStatus] = useState<WhitelistStatus | null>(null);
   const [loading, setLoading] = useState(false);
+  const [tick, setTick] = useState(0);
+
+  const refetch = useCallback(() => setTick((t) => t + 1), []);
 
   useEffect(() => {
     if (!wallet) return;
@@ -19,7 +22,7 @@ export function useWhitelist(wallet: string | null) {
       .then((r) => r.json())
       .then(setStatus)
       .finally(() => setLoading(false));
-  }, [wallet]);
+  }, [wallet, tick]);
 
-  return { status, loading, refetch: () => setStatus(null) };
+  return { status, loading, refetch };
 }

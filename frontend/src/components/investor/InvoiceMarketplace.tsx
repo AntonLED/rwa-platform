@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useInvoiceProgram, Invoice } from "../../hooks/useInvoice";
+import { useRefreshListener } from "../../hooks/useRefresh";
 import StatusBadge from "../shared/StatusBadge";
 import RiskBadge from "../shared/RiskBadge";
 
@@ -9,12 +10,13 @@ export default function InvoiceMarketplace() {
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
+  const tick = useRefreshListener();
 
   useEffect(() => {
     fetchAllInvoices()
       .then((all) => setInvoices(all.filter((i) => i.status === "Funding")))
       .finally(() => setLoading(false));
-  }, []);
+  }, [tick]);
 
   if (loading) return <p>Loading marketplace...</p>;
   if (!invoices.length) return <p style={{ color: "#888" }}>No invoices available for funding.</p>;

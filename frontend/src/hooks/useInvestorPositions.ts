@@ -5,7 +5,7 @@ import { useCallback, useMemo, useState } from "react";
 import idl from "../idl/rwa_token.json";
 import type { Invoice } from "./useInvoice";
 
-const PROGRAM_ID = new PublicKey("J5zLwZs3qmKv69Xd2eGmvbGf8PuCtKD5bh22dm9iZHre");
+const PROGRAM_ID = new PublicKey("GH9TPWVqa4UVNARHFBXadN5uwLMrhtE6obaHC9LFCKFz");
 const INVESTOR_SEED = Buffer.from("investor");
 
 export interface InvestorPosition {

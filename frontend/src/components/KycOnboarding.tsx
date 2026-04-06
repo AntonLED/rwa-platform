@@ -1,18 +1,15 @@
 import { useState } from "react";
 
-interface Props { wallet: string }
+interface Props { wallet: string; onKycComplete?: () => void }
 
 /**
  * Компонент встраивает Sumsub WebSDK iframe.
- * 1. Запрашивает у бэкенда SDK-токен (POST /api/kyc/token)
- * 2. Динамически загружает Sumsub WebSDK скрипт
- * 3. Запускает верификацию прямо в странице
- *
- * Docs: https://developers.sumsub.com/web-sdk/
+ * В mock-режиме (бэкенд возвращает { mock: true }) — сразу показывает "KYC Approved".
  */
-export default function KycOnboarding({ wallet }: Props) {
+export default function KycOnboarding({ wallet, onKycComplete }: Props) {
   const [loading, setLoading] = useState(false);
   const [started, setStarted] = useState(false);
+  const [mockApproved, setMockApproved] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   async function startKyc() {
@@ -24,15 +21,22 @@ export default function KycOnboarding({ wallet }: Props) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ walletAddress: wallet }),
       });
-      const { token, error: apiError } = await res.json();
-      if (apiError) throw new Error(apiError);
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
 
-      // Динамически загружаем Sumsub WebSDK
+      // Mock mode — backend whitelisted directly, no Sumsub iframe needed
+      if (data.mock) {
+        setMockApproved(true);
+        setStarted(true);
+        onKycComplete?.();
+        return;
+      }
+
+      // Real Sumsub flow
       await loadSumsubSdk();
 
-      // Запускаем SDK
       const snsWebSdkInstance = (window as any).snsWebSdk
-        .init(token, () => fetchNewToken(wallet))
+        .init(data.token, () => fetchNewToken(wallet))
         .withConf({ lang: "en" })
         .withOptions({ addViewportTag: false, adaptIframeHeight: true })
         .on("idCheck.onStepCompleted", (payload: any) => {
@@ -54,6 +58,18 @@ export default function KycOnboarding({ wallet }: Props) {
 
   return (
     <div style={{ margin: "16px 0" }}>
+      {mockApproved && (
+        <div style={{
+          padding: "12px 20px",
+          background: "#e8f5e9",
+          border: "1px solid #4caf50",
+          borderRadius: 8,
+          color: "#2e7d32",
+          fontWeight: 600,
+        }}>
+          KYC Approved (Mock Mode) — wallet whitelisted on-chain
+        </div>
+      )}
       {!started && (
         <button
           onClick={startKyc}

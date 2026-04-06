@@ -1,11 +1,13 @@
 import { useEffect, useState } from "react";
-import { useInvoiceProgram, Invoice } from "../../hooks/useInvoice";
+import { useInvoiceProgram } from "../../hooks/useInvoice";
+import { useRefreshListener } from "../../hooks/useRefresh";
 import InvoiceManagement from "./InvoiceManagement";
 import PoolManagement from "./PoolManagement";
 
 export default function AdminDashboard() {
   const { fetchAllInvoices } = useInvoiceProgram();
   const [stats, setStats] = useState({ total: 0, funding: 0, funded: 0, repaid: 0, defaulted: 0, totalValue: 0 });
+  const tick = useRefreshListener();
 
   useEffect(() => {
     fetchAllInvoices().then((all) => {
@@ -18,7 +20,7 @@ export default function AdminDashboard() {
         totalValue: all.reduce((s, i) => s + Number(i.totalAmount), 0) / 1e6,
       });
     });
-  }, []);
+  }, [tick]);
 
   const cards = [
     { label: "Total Invoices", value: stats.total, color: "#1976d2" },

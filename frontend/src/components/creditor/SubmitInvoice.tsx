@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
+import { emitRefresh } from "../../hooks/useRefresh";
 
 interface EdoPreFill {
   debtorName: string;
@@ -66,6 +67,7 @@ export default function SubmitInvoice({ preFill, onClearPreFill }: Props) {
       if (!res.ok) throw new Error(data.error || "Failed to create invoice");
       setResult(data);
       onClearPreFill?.();
+      emitRefresh();
     } catch (e: any) {
       setError(e.message);
     } finally {

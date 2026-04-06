@@ -103,28 +103,111 @@ Funding → Funded → Advanced → Repaid → (Investor Claims)
 
 ### Требования
 
-- Solana CLI (agave 2.1+)
-- Anchor CLI 0.31.1
-- Node 20+, Yarn
+| Инструмент | Минимальная версия | Проверить |
+|---|---|---|
+| Rust | 1.85+ | `rustc --version` |
+| Solana CLI (Agave) | 3.1.x | `solana --version` |
+| Anchor CLI | 0.31.x | `anchor --version` |
+| Platform-tools | v1.52+ | `cargo build-sbf --version` |
+| Node.js | 20+ | `node --version` |
+| Yarn | 1.22+ | `yarn --version` |
+
+**Установка тулчейна:**
+
+```bash
+# Rust
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+rustup default stable
+
+# Agave (Solana CLI)
+agave-install init 3.1.11
+
+# Anchor CLI
+cargo install --git https://github.com/coral-xyz/anchor --tag v0.31.0 anchor-cli
+
+# Node.js зависимости
+yarn install
+```
 
 ### 1. Сборка и деплой
 
 ```bash
-# Настройка Solana
+# Настройка Solana — используем shared devnet keypair из репо
 solana config set --url devnet
-solana-keygen new --outfile ~/.config/solana/id.json
-solana airdrop 2
+solana config set --keypair keys/devnet-authority.json
+solana airdrop 2    # нужен SOL для транзакций
 
 # Сборка программы
 anchor build
+
+# Синхронизация IDL (обязательно после каждого anchor build!)
 yarn copy-idl
 
-# Деплой
+# Деплой (обычно уже задеплоен — этот шаг только при первом деплое)
 anchor deploy
 
-# Инициализация devnet (registry + пулы + mock USDT)
+# ⚠️ Перед запуском — вставь адрес своего Phantom кошелька (инвестор) в:
+#   scripts/init-devnet.ts → INVESTOR_WALLET_ADDRESS
+# Скрипт выдаст 100K mock USDT на этот адрес для тестирования fund invoice.
 anchor run init-devnet
 ```
+
+> **Keypair:** Devnet keypair оператора лежит в `keys/devnet-authority.json` и используется бэкендом автоматически. Генерировать свой не нужно.
+
+> **Важно:** `Anchor.toml` → `[provider] cluster` должен быть `Devnet` для деплоя и `Localnet` для тестов. Переключать вручную перед каждой операцией.
+
+### Troubleshooting
+
+<details>
+<summary><b>edition2024 is required / feature not stabilized in Cargo X.XX</b></summary>
+
+`anchor build` использует встроенный Cargo из Solana platform-tools, а не системный. Если platform-tools < v1.52, его Cargo слишком старый для зависимостей с `edition = "2024"`.
+
+**Решение:**
+
+```bash
+# 1. Обновить Agave (включает platform-tools v1.52+)
+agave-install init 3.1.11
+
+# 2. Очистить кэш cargo registry
+rm -rf ~/.cargo/registry/src/index.crates.io-*/toml_datetime-1.1.1*
+
+# 3. Пересобрать
+anchor build
+```
+
+Проверить версию platform-tools: `cargo build-sbf --version` → должна быть v1.52+.
+</details>
+
+<details>
+<summary><b>anchor build зависает или падает по памяти</b></summary>
+
+Сборка Solana BPF-программ требует ~4GB RAM. На машинах с малым объёмом памяти:
+
+```bash
+# Ограничить параллелизм
+CARGO_BUILD_JOBS=2 anchor build
+```
+</details>
+
+<details>
+<summary><b>IDL not found / Account not found после билда</b></summary>
+
+IDL не синхронизирован с фронтендом/бэкендом:
+
+```bash
+yarn copy-idl   # Копирует target/idl/rwa_token.json → frontend/src/idl/ + backend/src/idl/
+```
+</details>
+
+<details>
+<summary><b>Custom program error при деплое / тестах</b></summary>
+
+Program ID не совпадает. После первого деплоя обновить ID во всех 3 местах:
+- `Anchor.toml` → `[programs.devnet]` и `[programs.localnet]`
+- `backend/src/lib/solana.ts` → `PROGRAM_ID`
+- `frontend/src/hooks/useInvoice.ts` → `PROGRAM_ID`
+</details>
 
 После деплоя обновить Program ID в:
 - `Anchor.toml` → `[programs.devnet]`
@@ -170,7 +253,8 @@ anchor test --skip-local-validator
 ```bash
 cd backend
 cp .env.example .env
-# Заполнить: SOLANA_RPC_URL, BACKEND_PRIVATE_KEY, SUMSUB_APP_TOKEN, SUMSUB_SECRET_KEY, SUMSUB_WEBHOOK_SECRET
+# Keypair оператора берётся из keys/devnet-authority.json автоматически
+# Sumsub credentials — опционально, без них работает mock KYC
 yarn dev             # http://localhost:4000
 ```
 
@@ -195,9 +279,11 @@ yarn dev             # http://localhost:5173
 
 ## Демо-сценарий
 
+**Подготовка:** вставь адрес своего Phantom кошелька в `scripts/init-devnet.ts` → `INVESTOR_WALLET_ADDRESS`, затем запусти `anchor run init-devnet`. Скрипт выдаст 100K mock USDT на этот адрес.
+
 1. **Подключить кошелёк** — открыть `localhost:5173`, подключить Phantom
-2. **Роль Creditor** — выбрать роль в хедере
-3. **Импорт ЭДО-инвойса** — нажать "EDO Import", выбрать инвойс, отправить
+2. **KYC** — нажать "Start KYC Verification" (mock режим — одобряется мгновенно)
+3. **Роль Creditor** — выбрать роль в хедере, импортировать инвойс из ЭДО или создать вручную
 4. **Роль Investor** — просмотреть маркетплейс, профинансировать инвойс USDT
 5. **Роль Admin** — авансировать 90% кредитору, затем подтвердить settle после оплаты дебитором
 6. **Роль Investor** — перейти в Портфель, получить возврат (principal + interest)
@@ -225,5 +311,5 @@ yarn dev             # http://localhost:5173
 ## Program ID
 
 ```
-J5zLwZs3qmKv69Xd2eGmvbGf8PuCtKD5bh22dm9iZHre (Devnet)
+GH9TPWVqa4UVNARHFBXadN5uwLMrhtE6obaHC9LFCKFz (Devnet)
 ```

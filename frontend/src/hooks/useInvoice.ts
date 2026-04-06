@@ -1,13 +1,19 @@
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import { Program, AnchorProvider, BN } from "@coral-xyz/anchor";
 import { PublicKey, SystemProgram } from "@solana/web3.js";
-import { getAssociatedTokenAddressSync, TOKEN_2022_PROGRAM_ID } from "@solana/spl-token";
+import {
+  getAssociatedTokenAddressSync,
+  createAssociatedTokenAccountInstruction,
+  ASSOCIATED_TOKEN_PROGRAM_ID,
+  TOKEN_2022_PROGRAM_ID,
+} from "@solana/spl-token";
 import { useCallback, useMemo, useState } from "react";
 import idl from "../idl/rwa_token.json";
 
-const PROGRAM_ID = new PublicKey("J5zLwZs3qmKv69Xd2eGmvbGf8PuCtKD5bh22dm9iZHre");
+const PROGRAM_ID = new PublicKey("GH9TPWVqa4UVNARHFBXadN5uwLMrhtE6obaHC9LFCKFz");
 // Devnet USDT mint — replace with real USDT mint for mainnet
-export const USDT_MINT = new PublicKey("4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU");
+// export const USDT_MINT = new PublicKey("JD2RSTTxd6YEqak253jD4sq8L15xjBV3oSm9DHHSywQg");
+export const USDT_MINT = new PublicKey("JD2RSTTxd6YEqak253jD4sq8L15xjBV3oSm9DHHSywQg");
 const INVOICE_SEED = Buffer.from("invoice");
 const INVESTOR_SEED = Buffer.from("investor");
 
@@ -76,6 +82,25 @@ export function useInvoiceProgram() {
           invoiceMint, wallet.publicKey, false, TOKEN_2022_PROGRAM_ID
         );
 
+        // Create ATAs that may not exist yet (vault for invoice PDA, investor invoice tokens)
+        const preIxs = [];
+        const conn = program.provider.connection;
+
+        for (const { mint, owner, ata } of [
+          { mint: usdtMint, owner: invoicePda, ata: invoiceVault },
+          { mint: invoiceMint, owner: wallet.publicKey, ata: investorInvoiceTokens },
+        ]) {
+          const info = await conn.getAccountInfo(ata);
+          if (!info) {
+            preIxs.push(
+              createAssociatedTokenAccountInstruction(
+                wallet.publicKey, ata, owner, mint,
+                TOKEN_2022_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID
+              )
+            );
+          }
+        }
+
         const tx = await program.methods
           .fundInvoice(invoiceId, new BN(amount))
           .accounts({
@@ -90,6 +115,7 @@ export function useInvoiceProgram() {
             tokenProgram: TOKEN_2022_PROGRAM_ID,
             systemProgram: SystemProgram.programId,
           })
+          .preInstructions(preIxs)
           .rpc();
         return tx;
       } finally {

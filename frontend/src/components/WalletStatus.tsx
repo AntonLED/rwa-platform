@@ -1,9 +1,17 @@
 import { useWhitelist } from "../hooks/useWhitelist";
+import { useEffect } from "react";
 
-interface Props { wallet: string }
+interface Props {
+  wallet: string;
+  onRefetchReady?: (refetch: () => void) => void;
+}
 
-export default function WalletStatus({ wallet }: Props) {
-  const { status, loading } = useWhitelist(wallet);
+export default function WalletStatus({ wallet, onRefetchReady }: Props) {
+  const { status, loading, refetch } = useWhitelist(wallet);
+
+  useEffect(() => {
+    onRefetchReady?.(refetch);
+  }, [refetch, onRefetchReady]);
 
   if (loading) return <p>Checking KYC status…</p>;
   if (!status) return null;

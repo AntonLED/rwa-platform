@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { useInvoiceProgram, Invoice } from "../../hooks/useInvoice";
+import { useRefreshListener } from "../../hooks/useRefresh";
 import SubmitInvoice from "./SubmitInvoice";
 import EdoImport from "./EdoImport";
 import StatusBadge from "../shared/StatusBadge";
@@ -13,6 +14,7 @@ export default function CreditorDashboard() {
   const [loading, setLoading] = useState(true);
   const [preFill, setPreFill] = useState<{ debtorName: string; amount: number; dueDate: string } | null>(null);
   const [tab, setTab] = useState<"submit" | "edo" | "my">("submit");
+  const tick = useRefreshListener();
 
   useEffect(() => {
     fetchAllInvoices()
@@ -24,7 +26,7 @@ export default function CreditorDashboard() {
         }
       })
       .finally(() => setLoading(false));
-  }, [publicKey]);
+  }, [publicKey, tick]);
 
   return (
     <div>

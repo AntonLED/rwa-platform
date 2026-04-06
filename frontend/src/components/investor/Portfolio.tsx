@@ -3,6 +3,7 @@ import { useWallet } from "@solana/wallet-adapter-react";
 import { PublicKey } from "@solana/web3.js";
 import { useInvoiceProgram, Invoice, USDT_MINT } from "../../hooks/useInvoice";
 import { useInvestorPositions } from "../../hooks/useInvestorPositions";
+import { emitRefresh, useRefreshListener } from "../../hooks/useRefresh";
 import StatusBadge from "../shared/StatusBadge";
 
 export default function Portfolio() {
@@ -12,6 +13,7 @@ export default function Portfolio() {
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [claimResult, setClaimResult] = useState<Record<string, string>>({});
   const [claimError, setClaimError] = useState<Record<string, string>>({});
+  const tick = useRefreshListener();
 
   useEffect(() => {
     if (!publicKey) return;
@@ -19,7 +21,7 @@ export default function Portfolio() {
       setInvoices(all);
       fetchPositions(all);
     });
-  }, [publicKey]);
+  }, [publicKey, tick]);
 
   if (!publicKey) return <p style={{ color: "#888" }}>Connect wallet to see portfolio.</p>;
   if (loading) return <p>Loading positions...</p>;
@@ -35,6 +37,7 @@ export default function Portfolio() {
     try {
       const tx = await claimReturns(invoiceId, USDT_MINT, new PublicKey(inv.mint));
       setClaimResult((p) => ({ ...p, [invoiceId]: tx }));
+      emitRefresh();
     } catch (e: any) {
       setClaimError((p) => ({ ...p, [invoiceId]: e.message }));
     }

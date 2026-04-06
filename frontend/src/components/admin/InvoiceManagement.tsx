@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useInvoiceProgram, Invoice } from "../../hooks/useInvoice";
+import { emitRefresh, useRefreshListener } from "../../hooks/useRefresh";
 import StatusBadge from "../shared/StatusBadge";
 import RiskBadge from "../shared/RiskBadge";
 
@@ -9,10 +10,11 @@ export default function InvoiceManagement() {
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [actionResult, setActionResult] = useState<Record<string, string>>({});
+  const tick = useRefreshListener();
 
   useEffect(() => {
     loadInvoices();
-  }, []);
+  }, [tick]);
 
   async function loadInvoices() {
     setLoading(true);
@@ -28,7 +30,7 @@ export default function InvoiceManagement() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
       setActionResult((p) => ({ ...p, [invoiceId]: `${action}: ${data.tx?.slice(0, 16)}...` }));
-      loadInvoices();
+      emitRefresh();
     } catch (e: any) {
       setActionResult((p) => ({ ...p, [invoiceId]: `Error: ${e.message}` }));
     } finally {

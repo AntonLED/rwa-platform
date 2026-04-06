@@ -6,6 +6,7 @@ Cargo.lock
 # Anchor / Solana
 .anchor/
 test-ledger/
+.devnet-state.json
 dist/
 **/*.so
 
@@ -41,3 +42,4 @@ Thumbs.db
 *.ntvs*
 *.njsproj
 *.sln
+.claude

@@ -3,6 +3,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { PublicKey } from "@solana/web3.js";
 import { useInvoiceProgram, Invoice, USDT_MINT } from "../../hooks/useInvoice";
+import { emitRefresh, useRefreshListener } from "../../hooks/useRefresh";
 import StatusBadge from "../shared/StatusBadge";
 import RiskBadge from "../shared/RiskBadge";
 import DocumentVerifier from "../shared/DocumentVerifier";
@@ -17,11 +18,13 @@ export default function InvoiceDetail() {
   const [txResult, setTxResult] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  const tick = useRefreshListener();
+
   useEffect(() => {
     if (id) {
       fetchInvoice(id).then(setInvoice);
     }
-  }, [id]);
+  }, [id, tick]);
 
   if (!invoice) return <p>Loading invoice...</p>;
 
@@ -39,6 +42,7 @@ export default function InvoiceDetail() {
       const invoiceMint = new PublicKey(invoice!.mint);
       const tx = await fundInvoice(id, amountLamports, USDT_MINT, invoiceMint);
       setTxResult(tx);
+      emitRefresh();
     } catch (e: any) {
       setError(e.message);
     }

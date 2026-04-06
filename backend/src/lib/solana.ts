@@ -14,6 +14,7 @@ import {
   TOKEN_2022_PROGRAM_ID,
   createMint,
   getAssociatedTokenAddressSync,
+  getOrCreateAssociatedTokenAccount,
 } from "@solana/spl-token";
 import * as fs from "fs";
 import * as path from "path";
@@ -29,7 +30,7 @@ try {
 }
 
 const PROGRAM_ID = new PublicKey(
-  process.env.PROGRAM_ID ?? "J5zLwZs3qmKv69Xd2eGmvbGf8PuCtKD5bh22dm9iZHre"
+  process.env.PROGRAM_ID ?? "GH9TPWVqa4UVNARHFBXadN5uwLMrhtE6obaHC9LFCKFz"
 );
 
 // ── PDA seeds ─────────────────────────────────────────────────────────────
@@ -54,10 +55,20 @@ export function getConnection(): Connection {
 }
 
 export function getBackendKeypair(): Keypair {
-  const raw = process.env.BACKEND_PRIVATE_KEY;
-  if (!raw) throw new Error("BACKEND_PRIVATE_KEY not set");
-  const decoded = Buffer.from(raw, "base64");
-  return Keypair.fromSecretKey(decoded);
+  // 1. Try keypair file (recommended for team use)
+  const keyfilePath = process.env.BACKEND_KEYPAIR_PATH
+    ?? path.join(__dirname, "../../../keys/devnet-authority.json");
+  try {
+    const raw = JSON.parse(fs.readFileSync(keyfilePath, "utf-8"));
+    return Keypair.fromSecretKey(Uint8Array.from(raw));
+  } catch {
+    // 2. Fallback to base64 env var
+    const b64 = process.env.BACKEND_PRIVATE_KEY;
+    if (!b64) throw new Error(
+      "Backend keypair not found. Either place keys/devnet-authority.json or set BACKEND_PRIVATE_KEY (base64)."
+    );
+    return Keypair.fromSecretKey(Buffer.from(b64, "base64"));
+  }
 }
 
 export function getProgram(): Program {
@@ -284,12 +295,18 @@ export async function advanceToCreditor(invoiceId: string): Promise<string> {
     TOKEN_2022_PROGRAM_ID
   );
 
-  const creditorUsdt = getAssociatedTokenAddressSync(
+  // Ensure creditor USDT ATA exists
+  const creditorAtaAccount = await getOrCreateAssociatedTokenAccount(
+    getConnection(),
+    backendKeypair,
     usdtMint,
     invoice.creditor,
-    true,
+    false,
+    "confirmed",
+    undefined,
     TOKEN_2022_PROGRAM_ID
   );
+  const creditorUsdt = creditorAtaAccount.address;
 
   const tx = await program.methods
     .advanceToCreditor(invoiceId)
@@ -320,12 +337,18 @@ export async function settleInvoice(invoiceId: string): Promise<string> {
     TOKEN_2022_PROGRAM_ID
   );
 
-  const authorityUsdt = getAssociatedTokenAddressSync(
+  // Ensure authority USDT ATA exists
+  const authorityAtaAccount = await getOrCreateAssociatedTokenAccount(
+    getConnection(),
+    backendKeypair,
     usdtMint,
     backendKeypair.publicKey,
     false,
+    "confirmed",
+    undefined,
     TOKEN_2022_PROGRAM_ID
   );
+  const authorityUsdt = authorityAtaAccount.address;
 
   const tx = await program.methods
     .settleInvoice(invoiceId)
