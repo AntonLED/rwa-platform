@@ -12,9 +12,10 @@ import idl from "../idl/rwa_token.json";
 
 const PROGRAM_ID = new PublicKey("J5zLwZs3qmKv69Xd2eGmvbGf8PuCtKD5bh22dm9iZHre");
 
-// Devnet USDT mint
-export const USDT_MINT = new PublicKey("DYMTGLoPZun6XjDksi4FuRRKpPVqACbToD7p8k1tEYaq");
-// export const USDT_MINT = new PublicKey("JD2RSTTxd6YEqak253jD4sq8L15xjBV3oSm9DHHSywQg");
+// Devnet USDT mint — set via VITE_USDT_MINT in frontend/.env (auto-patched by init-devnet)
+const USDT_MINT_STR = import.meta.env.VITE_USDT_MINT;
+if (!USDT_MINT_STR) throw new Error("VITE_USDT_MINT not set — run 'anchor run init-devnet' or add it to frontend/.env");
+export const USDT_MINT = new PublicKey(USDT_MINT_STR);
 
 const INVOICE_SEED = Buffer.from("invoice");
 const INVESTOR_SEED = Buffer.from("investor");

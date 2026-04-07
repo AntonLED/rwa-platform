@@ -146,31 +146,34 @@ solana airdrop 2    # нужен SOL для транзакций
 
 > **Keypair:** Devnet keypair оператора лежит в `keys/devnet-authority.json` (адрес `7oCPSDaLwJPAEFmM5H2W9YFENyN8t5z8yNL6NKEXGWAx`). Используется бэкендом и Anchor автоматически.
 
-### 2. Сборка и деплой (только при первом запуске / изменении контракта)
+### 2. Сборка (обязательна при первом запуске)
 
 ```bash
-anchor build
-yarn copy-idl          # обязательно после каждого anchor build!
-anchor deploy          # обычно уже задеплоен, пропустить если не менял контракт
+anchor build             # генерирует target/types/ — нужно для init-devnet
+# yarn copy-idl          # IDL уже в git, нужно только если менял контракт
+# anchor deploy          # программа уже на devnet, пропустить если не менял контракт
 ```
+
+> **Зачем build без deploy?** Скрипт `init-devnet` использует TypeScript типы из `target/types/rwa_token.ts`, которые генерируются при сборке. Без `anchor build` скрипт не запустится.
 
 ### 3. Инициализация devnet
 
 ```bash
-# ⚠️ Перед запуском — открой scripts/init-devnet.ts и вставь
-#    адрес своего Phantom кошелька в INVESTOR_WALLET_ADDRESS
-#    Скрипт выдаст 100K mock USDT на этот адрес.
+# Опционально: открой scripts/init-devnet.ts и вставь
+# адрес своего Phantom кошелька в INVESTOR_WALLET_ADDRESS
+# чтобы получить 100K mock USDT. Можно пропустить — USDT выдаётся через UI.
 
 anchor run init-devnet
 ```
 
 Скрипт выполняет:
-1. Инициализация WhitelistRegistry (если нет)
-2. Инициализация пулов Senior (5%) и Junior (12%)
-3. Создание mock USDT mint с метаданными (Token-2022)
-4. Airdrop 100K USDT инвестору
-5. Mint 1M USDT authority (для settle операций)
-6. Автопатч `USDT_MINT` в `backend/.env` и `frontend/src/hooks/useInvoice.ts`
+1. Создаёт `backend/.env` из `.env.example` (если нет)
+2. Инициализация WhitelistRegistry (если нет)
+3. Инициализация пулов Senior (5%) и Junior (12%)
+4. Создание mock USDT mint с метаданными (Token-2022)
+5. Airdrop 100K USDT инвестору (если `INVESTOR_WALLET_ADDRESS` задан)
+6. Mint 1M USDT authority (для settle операций)
+7. Автопатч `USDT_MINT` в `backend/.env` и `frontend/.env`
 
 Состояние сохраняется в `.devnet-state.json` — при повторных запусках переиспользует существующий mint.
 
@@ -179,7 +182,6 @@ anchor run init-devnet
 ```bash
 # Терминал 1: бэкенд
 cd backend
-cp .env.example .env   # только при первом запуске
 yarn dev               # http://localhost:4000
 
 # Терминал 2: фронтенд
@@ -263,7 +265,7 @@ Phantom → POST /api/kyc/token → backend детектит placeholder credent
 
 ## Демо-сценарий
 
-**Подготовка:** вставь адрес своего Phantom кошелька в `scripts/init-devnet.ts` → `INVESTOR_WALLET_ADDRESS`, затем запусти `anchor run init-devnet`. Скрипт выдаст 100K mock USDT.
+**Подготовка:** запусти `anchor run init-devnet`. Для получения USDT используй кнопку "Get USDT" в хедере (10K за клик), или задай `INVESTOR_WALLET_ADDRESS` в `scripts/init-devnet.ts` и перезапусти скрипт (100K).
 
 1. **Открыть лендинг** — `localhost:5173`, подключить Phantom кошелёк
 2. **KYC** — нажать "KYC Required" в хедере (mock режим — одобряется мгновенно)

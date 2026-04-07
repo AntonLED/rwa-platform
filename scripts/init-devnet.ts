@@ -27,8 +27,9 @@ const POOL_CONFIG_SEED = Buffer.from("pool_config");
 const STATE_FILE = path.resolve(__dirname, "../.devnet-state.json");
 
 // === НАСТРОЙКА ИНВЕСТОРА ===
-// Вставь сюда адрес кошелька, которому нужно выдать токены
-const INVESTOR_WALLET_ADDRESS = "3sPuB3q1Nii6M9rmcfafTVt7fLRg98Mr4ibRCKsuh3CR"; 
+// Вставь сюда адрес своего Phantom кошелька, чтобы получить mock USDT.
+// Если не задан — шаг 6 (faucet) будет пропущен. Можно получить USDT позже через кнопку "Get USDT" в UI.
+const INVESTOR_WALLET_ADDRESS = "";
 const MINT_AMOUNT = 100_000; // Сколько USDT выдать
 
 interface DevnetState {
@@ -99,7 +100,9 @@ function saveState(state: DevnetState) {
 function patchFile(filePath: string, pattern: RegExp, replacement: string, label: string) {
   const abs = path.resolve(__dirname, "..", filePath);
   if (!fs.existsSync(abs)) {
-    console.log(`  ⚠ ${label}: file not found (${filePath})`);
+    // Create file with just the replacement line
+    fs.writeFileSync(abs, replacement + "\n");
+    console.log(`  ✓ ${label} created`);
     return;
   }
   const content = fs.readFileSync(abs, "utf8");
@@ -107,11 +110,25 @@ function patchFile(filePath: string, pattern: RegExp, replacement: string, label
     fs.writeFileSync(abs, content.replace(pattern, replacement));
     console.log(`  ✓ ${label} updated`);
   } else {
-    console.log(`  – ${label} already up to date`);
+    // Append if pattern not found
+    fs.writeFileSync(abs, content.trimEnd() + "\n" + replacement + "\n");
+    console.log(`  ✓ ${label} appended`);
+  }
+}
+
+async function ensureBackendEnv() {
+  const envPath = path.resolve(__dirname, "..", "backend/.env");
+  const examplePath = path.resolve(__dirname, "..", "backend/.env.example");
+  if (!fs.existsSync(envPath) && fs.existsSync(examplePath)) {
+    fs.copyFileSync(examplePath, envPath);
+    console.log("  ✓ backend/.env created from .env.example");
   }
 }
 
 async function main() {
+  // Ensure backend/.env exists before patching
+  await ensureBackendEnv();
+
   const provider = anchor.AnchorProvider.env();
   anchor.setProvider(provider);
   const program = anchor.workspace.RwaToken as Program<RwaToken>;
@@ -213,8 +230,12 @@ async function main() {
   }
 
   // === ШАГ 6: ВЫДАЧА ТОКЕНОВ ИНВЕСТОРУ (FAUCET) ===
+  if (!INVESTOR_WALLET_ADDRESS) {
+    console.log("\n6. Skipping investor faucet (INVESTOR_WALLET_ADDRESS not set).");
+    console.log("   → Use 'Get USDT' button in the UI header, or set the address in scripts/init-devnet.ts and re-run.");
+  } else {
   console.log("\n6. Running Faucet for Investor...");
-  
+
   const investorPubkey = new PublicKey(INVESTOR_WALLET_ADDRESS);
 
   try {
@@ -252,6 +273,7 @@ async function main() {
   } catch (e) {
     console.error("   ✘ Faucet error:", e);
   }
+  } // end INVESTOR_WALLET_ADDRESS check
 
   // 7. Mint USDT to authority (backend keypair) for settle operations
   console.log("\n7. Minting USDT to authority (for settle)...");
@@ -294,15 +316,15 @@ async function main() {
   // 5. Auto-patch
   const mintStr = usdtMint.toBase58();
   patchFile(
-    "frontend/src/hooks/useInvoice.ts",
-    /export const USDT_MINT = new PublicKey\("[^"]+"\)/,
-    `export const USDT_MINT = new PublicKey("${mintStr}")`,
-    "frontend/src/hooks/useInvoice.ts"
+    "frontend/.env",
+    /^VITE_USDT_MINT=.*$/m,
+    `VITE_USDT_MINT=${mintStr}`,
+    "frontend/.env"
   );
 
   patchFile(
     "backend/.env",
-    /^USDT_MINT=.+$/m,
+    /^USDT_MINT=.*$/m,
     `USDT_MINT=${mintStr}`,
     "backend/.env"
   );
