@@ -18,7 +18,7 @@ export function usePool() {
     try {
       const res = await fetch("/api/pools");
       const data = await res.json();
-      setPools(data.pools || []);
+      setPools(data.pools);
     } catch {
       setPools([]);
     } finally {
@@ -26,9 +26,21 @@ export function usePool() {
     }
   }
 
-  useEffect(() => {
-    fetchPools();
-  }, []);
+  async function initPool(riskLevel: number): Promise<string> {
+    const baseRateBps = riskLevel === 0 ? 500 : 1200;
+    const markupBps = riskLevel === 0 ? 100 : 300;
+    const res = await fetch("/api/pools/initialize", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ riskLevel, baseRateBps, markupBps }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error);
+    await fetchPools();
+    return data.tx;
+  }
 
-  return { pools, loading, refetch: fetchPools };
+  useEffect(() => { fetchPools(); }, []);
+
+  return { pools, loading, refetch: fetchPools, fetchPools, initPool };
 }

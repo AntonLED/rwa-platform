@@ -1,26 +1,7 @@
-const COLORS: Record<string, string> = {
-  Funding: "#2196f3",
-  Funded: "#ff9800",
-  Advanced: "#e65100",
-  Repaid: "#4caf50",
-  Defaulted: "#f44336",
+const MAP: Record<string, string> = {
+  Funding: "badge-blue", Funded: "badge-orange", Advanced: "badge-orange",
+  Repaid: "badge-green", Defaulted: "badge-red",
 };
-
 export default function StatusBadge({ status }: { status: string }) {
-  const bg = COLORS[status] || "#999";
-  return (
-    <span
-      style={{
-        display: "inline-block",
-        padding: "2px 10px",
-        borderRadius: 12,
-        background: bg,
-        color: "#fff",
-        fontSize: 12,
-        fontWeight: 600,
-      }}
-    >
-      {status}
-    </span>
-  );
+  return <span className={`badge ${MAP[status] || "badge-gray"}`}>{status}</span>;
 }

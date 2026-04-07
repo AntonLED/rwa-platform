@@ -18,7 +18,7 @@ const STATE_FILE = path.resolve(__dirname, "../.devnet-state.json");
 
 // === НАСТРОЙКА ИНВЕСТОРА ===
 // Вставь сюда адрес кошелька, которому нужно выдать токены
-const INVESTOR_WALLET_ADDRESS = "5UVjnQzFTpav1wQopVzYJVhhcCM1gu3VtCCjyRsgMqAj"; 
+const INVESTOR_WALLET_ADDRESS = "3sPuB3q1Nii6M9rmcfafTVt7fLRg98Mr4ibRCKsuh3CR"; 
 const MINT_AMOUNT = 100_000; // Сколько USDT выдать
 
 interface DevnetState {

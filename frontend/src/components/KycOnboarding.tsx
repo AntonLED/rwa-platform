@@ -2,10 +2,6 @@ import { useState } from "react";
 
 interface Props { wallet: string; onKycComplete?: () => void }
 
-/**
- * Компонент встраивает Sumsub WebSDK iframe.
- * В mock-режиме (бэкенд возвращает { mock: true }) — сразу показывает "KYC Approved".
- */
 export default function KycOnboarding({ wallet, onKycComplete }: Props) {
   const [loading, setLoading] = useState(false);
   const [started, setStarted] = useState(false);
@@ -13,82 +9,43 @@ export default function KycOnboarding({ wallet, onKycComplete }: Props) {
   const [error, setError] = useState<string | null>(null);
 
   async function startKyc() {
-    setLoading(true);
-    setError(null);
+    setLoading(true); setError(null);
     try {
       const res = await fetch("/api/kyc/token", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+        method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ walletAddress: wallet }),
       });
       const data = await res.json();
       if (data.error) throw new Error(data.error);
-
-      // Mock mode — backend whitelisted directly, no Sumsub iframe needed
       if (data.mock) {
-        setMockApproved(true);
-        setStarted(true);
-        onKycComplete?.();
-        return;
+        setMockApproved(true); setStarted(true); onKycComplete?.(); return;
       }
-
-      // Real Sumsub flow
       await loadSumsubSdk();
-
       const snsWebSdkInstance = (window as any).snsWebSdk
         .init(data.token, () => fetchNewToken(wallet))
         .withConf({ lang: "en" })
         .withOptions({ addViewportTag: false, adaptIframeHeight: true })
-        .on("idCheck.onStepCompleted", (payload: any) => {
-          console.log("Step completed:", payload);
-        })
-        .on("idCheck.onApplicantStatusChanged", (payload: any) => {
-          console.log("Status changed:", payload);
-        })
+        .on("idCheck.onStepCompleted", (p: any) => console.log("Step:", p))
+        .on("idCheck.onApplicantStatusChanged", (p: any) => console.log("Status:", p))
         .build();
-
       snsWebSdkInstance.launch("#sumsub-container");
       setStarted(true);
-    } catch (e: any) {
-      setError(e.message);
-    } finally {
-      setLoading(false);
-    }
+    } catch (e: any) { setError(e.message); }
+    finally { setLoading(false); }
   }
 
   return (
-    <div style={{ margin: "16px 0" }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-3)" }}>
       {mockApproved && (
-        <div style={{
-          padding: "12px 20px",
-          background: "#e8f5e9",
-          border: "1px solid #4caf50",
-          borderRadius: 8,
-          color: "#2e7d32",
-          fontWeight: 600,
-        }}>
-          KYC Approved (Mock Mode) — wallet whitelisted on-chain
-        </div>
+        <div className="alert alert-success">✓ KYC Approved (Mock Mode) — wallet whitelisted on-chain</div>
       )}
       {!started && (
-        <button
-          onClick={startKyc}
-          disabled={loading}
-          style={{
-            padding: "10px 24px",
-            background: "#512da8",
-            color: "#fff",
-            border: "none",
-            borderRadius: 6,
-            cursor: "pointer",
-            fontSize: 15,
-          }}
-        >
-          {loading ? "Loading…" : "Start KYC Verification"}
+        <button className="btn btn-primary" onClick={startKyc} disabled={loading}>
+          {loading ? "⏳ Loading..." : "🔐 Start KYC Verification"}
         </button>
       )}
-      {error && <p style={{ color: "red" }}>{error}</p>}
-      <div id="sumsub-container" style={{ marginTop: 16 }} />
+      {error && <div className="alert alert-error">⚠ {error}</div>}
+      <div id="sumsub-container" />
     </div>
   );
 }
@@ -98,16 +55,14 @@ function loadSumsubSdk(): Promise<void> {
     if ((window as any).snsWebSdk) return resolve();
     const script = document.createElement("script");
     script.src = "https://static.sumsub.com/idensic/static/sns-websdk-builder.js";
-    script.onload = () => resolve();
-    script.onerror = () => reject(new Error("Failed to load Sumsub SDK"));
+    script.onload = () => resolve(); script.onerror = () => reject(new Error("Failed to load Sumsub SDK"));
     document.head.appendChild(script);
   });
 }
 
 async function fetchNewToken(wallet: string): Promise<string> {
   const res = await fetch("/api/kyc/token", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
+    method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ walletAddress: wallet }),
   });
   const { token } = await res.json();

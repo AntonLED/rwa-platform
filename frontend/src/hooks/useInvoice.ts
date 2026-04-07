@@ -1,6 +1,6 @@
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
-import { Program, AnchorProvider, BN } from "@coral-xyz/anchor";
 import { PublicKey, SystemProgram } from "@solana/web3.js";
+import { Program, AnchorProvider, BN } from "@coral-xyz/anchor";
 import {
   getAssociatedTokenAddressSync,
   createAssociatedTokenAccountInstruction,
@@ -11,9 +11,11 @@ import { useCallback, useMemo, useState } from "react";
 import idl from "../idl/rwa_token.json";
 
 const PROGRAM_ID = new PublicKey("GH9TPWVqa4UVNARHFBXadN5uwLMrhtE6obaHC9LFCKFz");
-// Devnet USDT mint — replace with real USDT mint for mainnet
+
+// Devnet USDT mint
+export const USDT_MINT = new PublicKey("FJnMByeAJRZeVCsRUG7uXwNmN4vpe9vebTuuQxCDTnzq");
 // export const USDT_MINT = new PublicKey("JD2RSTTxd6YEqak253jD4sq8L15xjBV3oSm9DHHSywQg");
-export const USDT_MINT = new PublicKey("JD2RSTTxd6YEqak253jD4sq8L15xjBV3oSm9DHHSywQg");
+
 const INVOICE_SEED = Buffer.from("invoice");
 const INVESTOR_SEED = Buffer.from("investor");
 
@@ -49,7 +51,7 @@ export function useInvoiceProgram() {
   const fetchAllInvoices = useCallback(async (): Promise<Invoice[]> => {
     const res = await fetch("/api/invoices");
     const data = await res.json();
-    return data.invoices || [];
+    return data.invoices;
   }, []);
 
   const fetchInvoice = useCallback(async (invoiceId: string): Promise<Invoice | null> => {
@@ -58,8 +60,25 @@ export function useInvoiceProgram() {
     return res.json();
   }, []);
 
+  const fetchCreditorInvoices = useCallback(async (creditorWallet: string): Promise<Invoice[]> => {
+    const res = await fetch(`/api/invoices?creditor=${creditorWallet}`);
+    const data = await res.json();
+    return data.invoices;
+  }, []);
+
+  const isWhitelisted = useCallback(async (walletAddress: string): Promise<boolean> => {
+    const res = await fetch(`/api/kyc/status/${walletAddress}`);
+    const data = await res.json();
+    return data.isWhitelisted ?? false;
+  }, []);
+
   const fundInvoice = useCallback(
-    async (invoiceId: string, amount: number, usdtMint: PublicKey, invoiceMint: PublicKey) => {
+    async (
+      invoiceId: string,
+      amount: number,
+      usdtMint: PublicKey,
+      invoiceMint: PublicKey
+    ): Promise<string> => {
       if (!program || !wallet.publicKey) throw new Error("Wallet not connected");
       setLoading(true);
       try {
@@ -71,7 +90,6 @@ export function useInvoiceProgram() {
           [INVESTOR_SEED, Buffer.from(invoiceId), wallet.publicKey.toBuffer()],
           PROGRAM_ID
         );
-
         const investorUsdt = getAssociatedTokenAddressSync(
           usdtMint, wallet.publicKey, false, TOKEN_2022_PROGRAM_ID
         );
@@ -82,10 +100,9 @@ export function useInvoiceProgram() {
           invoiceMint, wallet.publicKey, false, TOKEN_2022_PROGRAM_ID
         );
 
-        // Create ATAs that may not exist yet (vault for invoice PDA, investor invoice tokens)
+        // Create ATAs that may not exist yet
         const preIxs = [];
         const conn = program.provider.connection;
-
         for (const { mint, owner, ata } of [
           { mint: usdtMint, owner: invoicePda, ata: invoiceVault },
           { mint: invoiceMint, owner: wallet.publicKey, ata: investorInvoiceTokens },
@@ -101,7 +118,7 @@ export function useInvoiceProgram() {
           }
         }
 
-        const tx = await program.methods
+        const tx = await (program.methods as any)
           .fundInvoice(invoiceId, new BN(amount))
           .accounts({
             invoice: invoicePda,
@@ -126,7 +143,7 @@ export function useInvoiceProgram() {
   );
 
   const claimReturns = useCallback(
-    async (invoiceId: string, usdtMint: PublicKey, invoiceMint: PublicKey) => {
+    async (invoiceId: string, usdtMint: PublicKey, invoiceMint: PublicKey): Promise<string> => {
       if (!program || !wallet.publicKey) throw new Error("Wallet not connected");
       setLoading(true);
       try {
@@ -138,7 +155,6 @@ export function useInvoiceProgram() {
           [INVESTOR_SEED, Buffer.from(invoiceId), wallet.publicKey.toBuffer()],
           PROGRAM_ID
         );
-
         const investorUsdt = getAssociatedTokenAddressSync(
           usdtMint, wallet.publicKey, false, TOKEN_2022_PROGRAM_ID
         );
@@ -149,7 +165,7 @@ export function useInvoiceProgram() {
           invoiceMint, wallet.publicKey, false, TOKEN_2022_PROGRAM_ID
         );
 
-        const tx = await program.methods
+        const tx = await (program.methods as any)
           .claim(invoiceId)
           .accounts({
             invoice: invoicePda,
@@ -171,5 +187,39 @@ export function useInvoiceProgram() {
     [program, wallet.publicKey]
   );
 
-  return { program, fetchAllInvoices, fetchInvoice, fundInvoice, claimReturns, loading };
+  // Admin helpers — call backend which calls program with platform wallet
+  const advanceInvoice = useCallback(async (invoiceId: string): Promise<string> => {
+    const res = await fetch(`/api/invoices/${invoiceId}/advance`, { method: "POST" });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error);
+    return data.tx;
+  }, []);
+
+  const repayInvoice = useCallback(async (invoiceId: string): Promise<string> => {
+    const res = await fetch(`/api/invoices/${invoiceId}/settle`, { method: "POST" });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error);
+    return data.tx;
+  }, []);
+
+  const defaultInvoice = useCallback(async (invoiceId: string): Promise<string> => {
+    const res = await fetch(`/api/invoices/${invoiceId}/default`, { method: "POST" });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error);
+    return data.tx;
+  }, []);
+
+  return {
+    program,
+    loading,
+    fetchAllInvoices,
+    fetchInvoice,
+    fetchCreditorInvoices,
+    isWhitelisted,
+    fundInvoice,
+    claimReturns,
+    advanceInvoice,
+    repayInvoice,
+    defaultInvoice,
+  };
 }

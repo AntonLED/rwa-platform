@@ -7,16 +7,13 @@ import AdminDashboard from "./components/admin/AdminDashboard";
 export default function App() {
   return (
     <BrowserRouter>
-      <div style={{ maxWidth: 960, margin: "0 auto", padding: 24, fontFamily: "sans-serif" }}>
-        <Header />
-        <Routes>
-          <Route path="/" element={<Navigate to="/investor" replace />} />
-          <Route path="/investor/*" element={<InvestorDashboard />} />
-          <Route path="/creditor" element={<CreditorDashboard />} />
-          <Route path="/admin" element={<AdminDashboard />} />
-          <Route path="*" element={<Navigate to="/investor" replace />} />
-        </Routes>
-      </div>
+      <Header />
+      <Routes>
+        <Route path="/" element={<Navigate to="/investor" replace />} />
+        <Route path="/investor/*" element={<InvestorDashboard />} />
+        <Route path="/creditor/*" element={<CreditorDashboard />} />
+        <Route path="/admin/*" element={<AdminDashboard />} />
+      </Routes>
     </BrowserRouter>
   );
 }
