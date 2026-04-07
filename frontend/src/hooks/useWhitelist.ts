@@ -1,25 +1,13 @@
-import { useEffect, useState } from "react";
-
-export interface WhitelistStatus {
-  whitelisted: boolean;
-  active: boolean;
-  kycId?: string;
-  countryCode?: string;
-  whitelistedAt?: number;
-}
-
-export function useWhitelist(wallet: string | null) {
-  const [status, setStatus] = useState<WhitelistStatus | null>(null);
-  const [loading, setLoading] = useState(false);
-
-  useEffect(() => {
+import { useEffect, useState, useCallback } from "react";
+import { useInvoiceProgram } from "./useInvoice";
+export function useWhitelist(wallet?: string) {
+  const { isWhitelisted: checkWhitelist } = useInvoiceProgram();
+  const [isWhitelisted, setIsWhitelisted] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const refetch = useCallback(() => {
     if (!wallet) return;
-    setLoading(true);
-    fetch(`/api/whitelist/${wallet}`)
-      .then((r) => r.json())
-      .then(setStatus)
-      .finally(() => setLoading(false));
+    checkWhitelist(wallet).then(setIsWhitelisted).finally(() => setLoading(false));
   }, [wallet]);
-
-  return { status, loading, refetch: () => setStatus(null) };
+  useEffect(() => { refetch(); }, [refetch]);
+  return { isWhitelisted, loading, refetch };
 }

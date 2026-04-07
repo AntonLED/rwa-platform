@@ -1,24 +1,30 @@
-import { useWallet } from "@solana/wallet-adapter-react";
-import { WalletMultiButton } from "@solana/wallet-adapter-react-ui";
-import WalletStatus from "./components/WalletStatus";
-import KycOnboarding from "./components/KycOnboarding";
-import InvoiceList from "./components/InvoiceList";
+import { BrowserRouter, Routes, Route } from "react-router-dom";
+import Header from "./components/shared/Header";
+import Landing from "./components/Landing";
+import InvestorDashboard from "./components/investor/InvestorDashboard";
+import CreditorDashboard from "./components/creditor/CreditorDashboard";
+import AdminDashboard from "./components/admin/AdminDashboard";
+
+function AppLayout() {
+  return (
+    <>
+      <Header />
+      <Routes>
+        <Route path="/investor/*" element={<InvestorDashboard />} />
+        <Route path="/creditor/*" element={<CreditorDashboard />} />
+        <Route path="/admin/*" element={<AdminDashboard />} />
+      </Routes>
+    </>
+  );
+}
 
 export default function App() {
-  const { publicKey } = useWallet();
-
   return (
-    <div style={{ maxWidth: 800, margin: "0 auto", padding: 24, fontFamily: "sans-serif" }}>
-      <h1>RWA Platform</h1>
-      <WalletMultiButton />
-
-      {publicKey && (
-        <>
-          <WalletStatus wallet={publicKey.toBase58()} />
-          <KycOnboarding wallet={publicKey.toBase58()} />
-          <InvoiceList />
-        </>
-      )}
-    </div>
+    <BrowserRouter>
+      <Routes>
+        <Route path="/" element={<Landing />} />
+        <Route path="/*" element={<AppLayout />} />
+      </Routes>
+    </BrowserRouter>
   );
 }
