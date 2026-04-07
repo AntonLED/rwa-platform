@@ -3,8 +3,9 @@ import { useInvoiceProgram } from "../../hooks/useInvoice";
 import { useRefreshListener } from "../../hooks/useRefresh";
 import InvoiceManagement from "./InvoiceManagement";
 import PoolManagement from "./PoolManagement";
+import WhitelistManagement from "./WhitelistManagement";
 
-type Tab = "overview" | "invoices" | "pools";
+type Tab = "overview" | "invoices" | "pools" | "kyc";
 
 export default function AdminDashboard() {
   const { fetchAllInvoices } = useInvoiceProgram();
@@ -22,7 +23,7 @@ export default function AdminDashboard() {
         defaulted: all.filter(i => i.status === "Defaulted").length,
         totalValue: all.reduce((s, i) => s + Number(i.totalAmount), 0) / 1e6,
       });
-    });
+    }).catch(() => {});
   }, [tick]);
 
   const health = stats.total > 0 ? ((stats.repaid / stats.total) * 100).toFixed(1) : "—";
@@ -72,6 +73,7 @@ export default function AdminDashboard() {
           { id: "overview", label: "📊 Overview" },
           { id: "invoices", label: "📄 Invoice Management" },
           { id: "pools", label: "🏦 Pool Management" },
+          { id: "kyc", label: "🔒 KYC Whitelist" },
         ] as const).map(t => (
           <button key={t.id} className={`tab-btn ${tab === t.id ? "active" : ""}`} onClick={() => setTab(t.id)}>
             {t.label}
@@ -126,6 +128,7 @@ export default function AdminDashboard() {
 
       {tab === "invoices" && <InvoiceManagement />}
       {tab === "pools" && <PoolManagement />}
+      {tab === "kyc" && <WhitelistManagement />}
     </div>
   );
 }

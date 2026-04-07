@@ -2,21 +2,21 @@ import { useEffect, useState } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { PublicKey } from "@solana/web3.js";
 import { useInvestorPositions } from "../../hooks/useInvestorPositions";
-import { useInvoiceProgram, Invoice } from "../../hooks/useInvoice";
+import { useInvoiceProgram, Invoice, USDT_MINT } from "../../hooks/useInvoice";
 import { emitRefresh } from "../../hooks/useRefresh";
 import StatusBadge from "../shared/StatusBadge";
 
-const USDT_MINT = new PublicKey("Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB");
-
 export default function Portfolio() {
   const { publicKey } = useWallet();
-  const { positions, loading } = useInvestorPositions(publicKey);
+  const { positions, loading, fetchPositions } = useInvestorPositions();
   const { fetchAllInvoices, claimReturns } = useInvoiceProgram();
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [claimResult, setClaimResult] = useState<Record<string, string>>({});
   const [claimError, setClaimError] = useState<Record<string, string>>({});
 
-  useEffect(() => { fetchAllInvoices().then(setInvoices); }, []);
+  useEffect(() => {
+    fetchAllInvoices().then(all => { setInvoices(all); fetchPositions(all); });
+  }, [publicKey]);
 
   if (!publicKey) return (
     <div className="empty-state">
@@ -82,6 +82,7 @@ export default function Portfolio() {
             <tr>
               <th>Invoice</th>
               <th>Amount</th>
+              <th>Tranche</th>
               <th>Status</th>
               <th>APY</th>
               <th>Due Date</th>
@@ -97,6 +98,11 @@ export default function Portfolio() {
                 <tr key={pos.invoiceId}>
                   <td><span style={{ fontFamily: "monospace", fontSize: "var(--text-xs)" }}>{pos.invoiceId.slice(0, 18)}...</span></td>
                   <td><strong>{(Number(pos.amount) / 1e6).toLocaleString()}</strong> USDT</td>
+                  <td>
+                    {pos.tranche === 0
+                      ? <span className="badge badge-green">Senior</span>
+                      : <span className="badge badge-yellow">Junior</span>}
+                  </td>
                   <td>{inv ? <StatusBadge status={inv.status} /> : "—"}</td>
                   <td style={{ color: "var(--success)", fontWeight: 600 }}>{inv ? inv.interestRateBps / 100 : "—"}%</td>
                   <td>{inv ? new Date(inv.dueDate * 1000).toLocaleDateString() : "—"}</td>

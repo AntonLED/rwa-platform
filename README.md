@@ -34,9 +34,9 @@
 1. Кредитор загружает инвойс (или импортирует из ЭДО)
    → хэш документа сохраняется on-chain, создаётся Token-2022 mint
 
-2. Инвесторы просматривают маркетплейс, финансируют инвойсы через USDT
+2. Инвесторы просматривают маркетплейс, выбирают транш (Senior 5% / Junior 12%) и финансируют через USDT
    → получают invoice-токены 1:1 (Token-2022)
-   → InvestorPosition PDA отслеживает каждый вклад
+   → InvestorPosition PDA фиксирует вклад, транш и ставку
 
 3. Admin авансирует 90% от суммы кредитору
    → invoice PDA подписывает CPI-перевод из vault
@@ -44,8 +44,9 @@
 4. Дебитор погашает (off-chain) → Admin подтверждает settle
    → authority депозитит principal + interest в vault
 
-5. Инвесторы сжигают invoice-токены → получают пропорциональную долю USDT
-   → payout = (investor_tokens / total_supply) * vault_balance
+5. Инвесторы сжигают invoice-токены → получают выплату по ставке своего транша
+   → payout = position.amount + position.amount × tranche_rate × days / 365 / 10000
+   → Senior выплачиваются первыми (waterfall при дефолте)
 ```
 
 ## Token-2022 Extensions
@@ -63,7 +64,7 @@
 | WhitelistEntry | `["whitelist_entry", wallet]` | KYC-запись кошелька (kyc_id, country_code, is_active) |
 | PoolConfig | `["pool_config", risk_level]` | Конфиг пула риска (base_rate_bps, markup_bps) |
 | InvoiceAccount | `["invoice", invoice_id]` | Состояние инвойса, authority vault, ссылка на mint |
-| InvestorPosition | `["investor", invoice_id, wallet]` | Запись инвестора: сумма вклада + статус claim |
+| InvestorPosition | `["investor", invoice_id, wallet]` | Запись инвестора: сумма, транш (Senior/Junior), ставка, статус claim |
 
 ## Жизненный цикл инвойса
 
@@ -77,8 +78,11 @@ Funding → Funded → Advanced → Repaid → (Investor Claims)
 | Метод | Путь | Описание |
 |---|---|---|
 | `POST` | `/api/kyc/token` | Получить SDK-токен для Sumsub WebSDK |
+| `GET` | `/api/whitelist` | Список всех KYC-записей (Admin) |
 | `GET` | `/api/whitelist/:wallet` | Проверить on-chain KYC-статус |
+| `POST` | `/api/whitelist/:wallet/revoke` | Отозвать KYC (Admin) |
 | `POST` | `/webhook/sumsub` | Sumsub webhook (GREEN→whitelist, RED→revoke) |
+| `POST` | `/api/faucet` | Выдать 10 000 mock USDT на кошелёк (devnet only) |
 | `POST` | `/api/invoices` | Создать инвойс (+ on-chain транзакция) |
 | `GET` | `/api/invoices` | Список всех инвойсов |
 | `GET` | `/api/invoices/:id` | Инвойс по ID |
@@ -97,7 +101,7 @@ Funding → Funded → Advanced → Repaid → (Investor Claims)
 |---|---|---|
 | **Investor** | `/investor` | Маркетплейс инвойсов, финансирование, портфель + claim |
 | **Creditor** | `/creditor` | Загрузка инвойсов, импорт из ЭДО, дашборд |
-| **Admin** | `/admin` | Управление инвойсами (advance/settle/default), управление пулами, статистика |
+| **Admin** | `/admin` | Статистика, управление инвойсами (advance/settle/default), управление пулами (Senior/Junior), KYC whitelist (просмотр + отзыв) |
 
 ## Быстрый старт
 
@@ -311,5 +315,5 @@ yarn dev             # http://localhost:5173
 ## Program ID
 
 ```
-GH9TPWVqa4UVNARHFBXadN5uwLMrhtE6obaHC9LFCKFz (Devnet)
+J5zLwZs3qmKv69Xd2eGmvbGf8PuCtKD5bh22dm9iZHre (Devnet)
 ```

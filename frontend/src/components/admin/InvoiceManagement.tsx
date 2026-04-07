@@ -2,7 +2,6 @@ import { useEffect, useState } from "react";
 import { useInvoiceProgram, Invoice } from "../../hooks/useInvoice";
 import { useRefreshListener } from "../../hooks/useRefresh";
 import StatusBadge from "../shared/StatusBadge";
-import RiskBadge from "../shared/RiskBadge";
 
 export default function InvoiceManagement() {
   const { fetchAllInvoices, advanceInvoice, repayInvoice, defaultInvoice } = useInvoiceProgram();
@@ -41,7 +40,7 @@ export default function InvoiceManagement() {
     <div className="table-wrap">
       <table>
         <thead>
-          <tr><th>ID</th><th>Amount</th><th>Funded</th><th>Status</th><th>Risk</th><th>Due</th><th>Actions</th></tr>
+          <tr><th>ID</th><th>Amount</th><th>Funded</th><th>Status</th><th>APY</th><th>Due</th><th>Actions</th></tr>
         </thead>
         <tbody>
           {invoices.map(inv => {
@@ -56,7 +55,7 @@ export default function InvoiceManagement() {
                 <td><strong>{total.toLocaleString()}</strong></td>
                 <td>{funded.toLocaleString()}</td>
                 <td><StatusBadge status={inv.status} /></td>
-                <td><RiskBadge riskLevel={inv.riskLevel} /></td>
+                <td style={{ color: "var(--success)", fontWeight: 600 }}>{inv.interestRateBps / 100}%</td>
                 <td style={{ fontSize:"var(--text-xs)" }}>{new Date(inv.dueDate * 1000).toLocaleDateString()}</td>
                 <td>
                   <div style={{ display:"flex", gap:"var(--space-1)", flexWrap:"wrap" }}>

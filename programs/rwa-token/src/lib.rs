@@ -6,7 +6,7 @@ use anchor_spl::token_interface::{
     TransferChecked,
 };
 
-declare_id!("GH9TPWVqa4UVNARHFBXadN5uwLMrhtE6obaHC9LFCKFz");
+declare_id!("J5zLwZs3qmKv69Xd2eGmvbGf8PuCtKD5bh22dm9iZHre");
 
 // ── Seeds ──────────────────────────────────────────────────────────────────
 pub const WHITELIST_REGISTRY_SEED: &[u8] = b"whitelist_registry";
@@ -135,7 +135,6 @@ pub mod rwa_token {
         debtor: Pubkey,
         due_date: i64,
         interest_rate_bps: u16,
-        risk_level: u8,
         document_hash: [u8; 32],
     ) -> Result<()> {
         require!(
@@ -143,7 +142,6 @@ pub mod rwa_token {
             RwaError::StringTooLong
         );
         require!(total_amount > 0, RwaError::InvalidAmount);
-        require!(risk_level <= 1, RwaError::InvalidRiskLevel);
 
         let inv = &mut ctx.accounts.invoice;
         inv.invoice_id = invoice_id.clone();
@@ -152,22 +150,18 @@ pub mod rwa_token {
         inv.debtor = debtor;
         inv.due_date = due_date;
         inv.interest_rate_bps = interest_rate_bps;
-        inv.risk_level = risk_level;
         inv.document_hash = document_hash;
         inv.funded_amount = 0;
+        inv.total_senior_funded = 0;
+        inv.senior_claimed = 0;
+        inv.senior_expected_payout = 0;
+        inv.settled_at = 0;
         inv.advance_paid = false;
         inv.status = InvoiceStatus::Funding;
         inv.authority = ctx.accounts.authority.key();
         inv.mint = ctx.accounts.invoice_mint.key();
         inv.created_at = Clock::get()?.unix_timestamp;
         inv.bump = ctx.bumps.invoice;
-
-        // Update pool stats
-        let pool = &mut ctx.accounts.pool_config;
-        pool.total_invoices = pool
-            .total_invoices
-            .checked_add(1)
-            .ok_or(RwaError::Overflow)?;
 
         emit!(InvoiceCreated {
             invoice_id,
@@ -176,7 +170,6 @@ pub mod rwa_token {
             debtor,
             due_date,
             interest_rate_bps,
-            risk_level,
             document_hash,
             timestamp: inv.created_at,
         });
@@ -184,13 +177,16 @@ pub mod rwa_token {
     }
 
     /// Investor deposits USDT and receives invoice tokens 1:1
-    pub fn fund_invoice(ctx: Context<FundInvoice>, invoice_id: String, amount: u64) -> Result<()> {
+    /// tranche: 0 = Senior (priority payout), 1 = Junior (subordinated)
+    pub fn fund_invoice(ctx: Context<FundInvoice>, invoice_id: String, amount: u64, tranche: u8) -> Result<()> {
         require!(amount > 0, RwaError::InvalidAmount);
+        require!(tranche <= 1, RwaError::InvalidTranche);
 
         // Read invoice state first (immutable)
         let invoice_status = ctx.accounts.invoice.status.clone();
         let total_amount = ctx.accounts.invoice.total_amount;
         let funded_amount = ctx.accounts.invoice.funded_amount;
+        let total_senior_funded = ctx.accounts.invoice.total_senior_funded;
         let invoice_bump = ctx.accounts.invoice.bump;
         let invoice_id_stored = ctx.accounts.invoice.invoice_id.clone();
 
@@ -242,9 +238,22 @@ pub mod rwa_token {
             .checked_add(amount)
             .ok_or(RwaError::Overflow)?;
 
+        if tranche == 0 {
+            inv.total_senior_funded = total_senior_funded
+                .checked_add(amount)
+                .ok_or(RwaError::Overflow)?;
+        }
+
         if inv.funded_amount >= total_amount {
             inv.status = InvoiceStatus::Funded;
         }
+
+        // Update pool stats
+        let pool = &mut ctx.accounts.pool_config;
+        pool.total_funded = pool
+            .total_funded
+            .checked_add(amount)
+            .ok_or(RwaError::Overflow)?;
 
         // Create/update investor position
         let pos = &mut ctx.accounts.investor_position;
@@ -253,12 +262,15 @@ pub mod rwa_token {
         pos.amount = pos.amount.checked_add(amount).ok_or(RwaError::Overflow)?;
         pos.funded_at = Clock::get()?.unix_timestamp;
         pos.claimed = false;
+        pos.tranche = tranche;
+        pos.interest_rate_bps = ctx.accounts.pool_config.base_rate_bps;
         pos.bump = ctx.bumps.investor_position;
 
         emit!(InvoiceFunded {
             invoice_id,
             investor: ctx.accounts.investor.key(),
             amount,
+            tranche,
             total_funded: inv.funded_amount,
             timestamp: pos.funded_at,
         });
@@ -317,37 +329,24 @@ pub mod rwa_token {
         Ok(())
     }
 
-    /// Backend confirms debtor has paid — deposits USDT into vault
-    pub fn settle_invoice(ctx: Context<SettleInvoice>, invoice_id: String) -> Result<()> {
+    /// Backend confirms debtor has paid — deposits exact amount into vault.
+    /// amount and senior_expected_payout are pre-calculated by the backend
+    /// based on each tranche's pool rate and elapsed days.
+    pub fn settle_invoice(
+        ctx: Context<SettleInvoice>,
+        invoice_id: String,
+        amount: u64,
+        senior_expected_payout: u64,
+    ) -> Result<()> {
+        require!(amount > 0, RwaError::InvalidAmount);
+
         let inv = &mut ctx.accounts.invoice;
         require!(
             inv.status == InvoiceStatus::Advanced,
             RwaError::InvalidStatus
         );
 
-        // Calculate total repayment: principal + interest
-        let days = Clock::get()?
-            .unix_timestamp
-            .saturating_sub(inv.created_at)
-            .max(0) as u64;
-        let days_count = days / 86400;
-        let rate_bps = inv.interest_rate_bps as u64;
-        // interest = principal * rate_bps * days / 365 / 10000
-        let interest = inv
-            .total_amount
-            .checked_mul(rate_bps)
-            .ok_or(RwaError::Overflow)?
-            .checked_mul(days_count)
-            .ok_or(RwaError::Overflow)?
-            / 365
-            / BPS_DENOMINATOR;
-
-        let repayment = inv
-            .total_amount
-            .checked_add(interest)
-            .ok_or(RwaError::Overflow)?;
-
-        // Transfer USDT from authority to vault (simulates debtor payment)
+        // Transfer USDT from authority to vault
         transfer_checked(
             CpiContext::new(
                 ctx.accounts.token_program.to_account_info(),
@@ -358,42 +357,69 @@ pub mod rwa_token {
                     authority: ctx.accounts.authority.to_account_info(),
                 },
             ),
-            repayment,
+            amount,
             ctx.accounts.usdt_mint.decimals,
         )?;
 
+        inv.settled_at = Clock::get()?.unix_timestamp;
+        inv.senior_expected_payout = senior_expected_payout;
         inv.status = InvoiceStatus::Repaid;
 
         emit!(InvoiceRepaid {
             invoice_id,
-            amount: repayment,
-            interest,
-            timestamp: Clock::get()?.unix_timestamp,
+            amount,
+            senior_expected_payout,
+            timestamp: inv.settled_at,
         });
         Ok(())
     }
 
-    /// Investor burns tokens and claims USDT proportional share from vault
+    /// Investor burns tokens and claims USDT.
+    /// Payout = position.amount + interest calculated at position's tranche rate.
+    /// Senior (tranche=0) investors are paid first; Junior (tranche=1) can only
+    /// claim after senior_claimed >= senior_expected_payout.
     pub fn claim(ctx: Context<Claim>, invoice_id: String) -> Result<()> {
-        let inv = &ctx.accounts.invoice;
-        require!(inv.status == InvoiceStatus::Repaid, RwaError::InvalidStatus);
+        // Read immutable invoice fields first
+        let inv_status = ctx.accounts.invoice.status.clone();
+        let inv_senior_claimed = ctx.accounts.invoice.senior_claimed;
+        let inv_senior_expected_payout = ctx.accounts.invoice.senior_expected_payout;
+        let inv_created_at = ctx.accounts.invoice.created_at;
+        let inv_settled_at = ctx.accounts.invoice.settled_at;
+        let invoice_id_bytes_owned = ctx.accounts.invoice.invoice_id.clone();
+        let inv_bump = ctx.accounts.invoice.bump;
 
-        let pos = &mut ctx.accounts.investor_position;
-        require!(!pos.claimed, RwaError::AlreadyClaimed);
+        require!(inv_status == InvoiceStatus::Repaid, RwaError::InvalidStatus);
+
+        let pos_tranche = ctx.accounts.investor_position.tranche;
+        let pos_claimed = ctx.accounts.investor_position.claimed;
+        let pos_amount = ctx.accounts.investor_position.amount;
+        let pos_rate_bps = ctx.accounts.investor_position.interest_rate_bps as u64;
+
+        require!(!pos_claimed, RwaError::AlreadyClaimed);
+
+        // Junior can only claim after all Senior payouts are complete
+        if pos_tranche == 1 {
+            require!(
+                inv_senior_claimed >= inv_senior_expected_payout,
+                RwaError::SeniorNotFullyPaid
+            );
+        }
 
         let investor_tokens = ctx.accounts.investor_invoice_tokens.amount;
         require!(investor_tokens > 0, RwaError::InvalidAmount);
 
-        let total_supply = ctx.accounts.invoice_mint.supply;
-        require!(total_supply > 0, RwaError::InvalidAmount);
-
-        // Calculate payout: investor_share * vault_balance
-        let vault_balance = ctx.accounts.invoice_vault.amount;
-        let payout = (vault_balance as u128)
-            .checked_mul(investor_tokens as u128)
+        // Calculate payout: principal + interest at position's tranche rate
+        // days = max(1, (settled_at - created_at) / 86400)
+        let elapsed_secs = inv_settled_at.saturating_sub(inv_created_at).max(0) as u64;
+        let days_count = (elapsed_secs / 86400).max(1);
+        let interest = pos_amount
+            .checked_mul(pos_rate_bps)
             .ok_or(RwaError::Overflow)?
-            .checked_div(total_supply as u128)
-            .ok_or(RwaError::Overflow)? as u64;
+            .checked_mul(days_count)
+            .ok_or(RwaError::Overflow)?
+            / 365
+            / BPS_DENOMINATOR;
+        let payout = pos_amount.checked_add(interest).ok_or(RwaError::Overflow)?;
 
         // Burn investor's invoice tokens
         burn(
@@ -409,9 +435,7 @@ pub mod rwa_token {
         )?;
 
         // Transfer USDT from vault to investor (invoice PDA signs)
-        let invoice_id_bytes = inv.invoice_id.as_bytes();
-        let bump = inv.bump;
-        let signer_seeds: &[&[&[u8]]] = &[&[INVOICE_SEED, invoice_id_bytes, &[bump]]];
+        let signer_seeds: &[&[&[u8]]] = &[&[INVOICE_SEED, invoice_id_bytes_owned.as_bytes(), &[inv_bump]]];
 
         transfer_checked(
             CpiContext::new(
@@ -428,13 +452,23 @@ pub mod rwa_token {
             ctx.accounts.usdt_mint.decimals,
         )?;
 
-        pos.claimed = true;
+        // Track Senior payouts so Junior knows when it's safe to claim
+        if pos_tranche == 0 {
+            let inv = &mut ctx.accounts.invoice;
+            inv.senior_claimed = inv_senior_claimed
+                .checked_add(payout)
+                .ok_or(RwaError::Overflow)?;
+        }
+
+        ctx.accounts.investor_position.claimed = true;
 
         emit!(InvestorClaimed {
             invoice_id,
             investor: ctx.accounts.investor.key(),
             tokens_burned: investor_tokens,
             usdt_received: payout,
+            tranche: pos_tranche,
+            interest_rate_bps: ctx.accounts.investor_position.interest_rate_bps,
             timestamp: Clock::get()?.unix_timestamp,
         });
         Ok(())
@@ -545,13 +579,6 @@ pub struct CreateInvoice<'info> {
     )]
     pub invoice: Account<'info, InvoiceAccount>,
 
-    #[account(
-        mut,
-        seeds = [POOL_CONFIG_SEED, &[pool_config.risk_level]],
-        bump = pool_config.bump
-    )]
-    pub pool_config: Account<'info, PoolConfig>,
-
     /// Token-2022 mint for this invoice (created externally or via CPI)
     /// Mint authority should be the invoice PDA
     #[account(mut)]
@@ -563,7 +590,7 @@ pub struct CreateInvoice<'info> {
 }
 
 #[derive(Accounts)]
-#[instruction(invoice_id: String)]
+#[instruction(invoice_id: String, amount: u64, tranche: u8)]
 pub struct FundInvoice<'info> {
     #[account(
         mut,
@@ -571,6 +598,14 @@ pub struct FundInvoice<'info> {
         bump = invoice.bump
     )]
     pub invoice: Account<'info, InvoiceAccount>,
+
+    /// Investor's chosen tranche pool (Senior=0 or Junior=1)
+    #[account(
+        mut,
+        seeds = [POOL_CONFIG_SEED, &[tranche]],
+        bump = pool_config.bump
+    )]
+    pub pool_config: Account<'info, PoolConfig>,
 
     /// CHECK: USDT mint
     pub usdt_mint: InterfaceAccount<'info, Mint>,
@@ -635,7 +670,7 @@ pub struct AdvanceToCreditor<'info> {
 }
 
 #[derive(Accounts)]
-#[instruction(invoice_id: String)]
+#[instruction(invoice_id: String, amount: u64, senior_expected_payout: u64)]
 pub struct SettleInvoice<'info> {
     #[account(
         mut,
@@ -671,6 +706,7 @@ pub struct SettleInvoice<'info> {
 #[instruction(invoice_id: String)]
 pub struct Claim<'info> {
     #[account(
+        mut,
         seeds = [INVOICE_SEED, invoice_id.as_bytes()],
         bump = invoice.bump
     )]
@@ -780,12 +816,15 @@ pub struct InvoiceAccount {
     pub invoice_id: String,
     pub total_amount: u64,
     pub funded_amount: u64,
+    pub total_senior_funded: u64,     // sum of all Senior (tranche=0) investments
+    pub senior_claimed: u64,          // sum of USDT already paid out to Senior investors
+    pub senior_expected_payout: u64,  // total owed to Senior (principal + interest), set at settle
     pub creditor: Pubkey,
     pub debtor: Pubkey,
     pub due_date: i64,
     pub created_at: i64,
+    pub settled_at: i64,              // timestamp when settle_invoice was called
     pub interest_rate_bps: u16,
-    pub risk_level: u8,
     pub document_hash: [u8; 32],
     pub advance_paid: bool,
     pub status: InvoiceStatus,
@@ -803,6 +842,8 @@ pub struct InvestorPosition {
     pub amount: u64,
     pub funded_at: i64,
     pub claimed: bool,
+    pub tranche: u8,            // 0 = Senior, 1 = Junior
+    pub interest_rate_bps: u16, // pool's base_rate_bps at fund time
     pub bump: u8,
 }
 
@@ -860,7 +901,6 @@ pub struct InvoiceCreated {
     pub debtor: Pubkey,
     pub due_date: i64,
     pub interest_rate_bps: u16,
-    pub risk_level: u8,
     pub document_hash: [u8; 32],
     pub timestamp: i64,
 }
@@ -870,6 +910,7 @@ pub struct InvoiceFunded {
     pub invoice_id: String,
     pub investor: Pubkey,
     pub amount: u64,
+    pub tranche: u8,
     pub total_funded: u64,
     pub timestamp: i64,
 }
@@ -885,8 +926,8 @@ pub struct AdvancePaid {
 #[event]
 pub struct InvoiceRepaid {
     pub invoice_id: String,
-    pub amount: u64,
-    pub interest: u64,
+    pub amount: u64,             // total deposited into vault
+    pub senior_expected_payout: u64,
     pub timestamp: i64,
 }
 
@@ -896,6 +937,8 @@ pub struct InvestorClaimed {
     pub investor: Pubkey,
     pub tokens_burned: u64,
     pub usdt_received: u64,
+    pub tranche: u8,
+    pub interest_rate_bps: u16,
     pub timestamp: i64,
 }
 
@@ -931,4 +974,8 @@ pub enum RwaError {
     AlreadyAdvanced,
     #[msg("Already claimed")]
     AlreadyClaimed,
+    #[msg("Junior cannot claim before all Senior investors are paid")]
+    SeniorNotFullyPaid,
+    #[msg("Tranche must be 0 (Senior) or 1 (Junior)")]
+    InvalidTranche,
 }

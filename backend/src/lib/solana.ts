@@ -18,6 +18,7 @@ import {
 } from "@solana/spl-token";
 import * as fs from "fs";
 import * as path from "path";
+import bs58 from "bs58";
 
 // Загружаем IDL после `anchor build`
 let idl: any;
@@ -30,7 +31,7 @@ try {
 }
 
 const PROGRAM_ID = new PublicKey(
-  process.env.PROGRAM_ID ?? "GH9TPWVqa4UVNARHFBXadN5uwLMrhtE6obaHC9LFCKFz"
+  process.env.PROGRAM_ID ?? "J5zLwZs3qmKv69Xd2eGmvbGf8PuCtKD5bh22dm9iZHre"
 );
 
 // ── PDA seeds ─────────────────────────────────────────────────────────────
@@ -233,14 +234,12 @@ export async function createInvoice(
   debtor: PublicKey,
   dueDate: number,
   interestRateBps: number,
-  riskLevel: number,
   documentHash: Uint8Array
 ): Promise<{ tx: string; mint: PublicKey }> {
   const program = getProgram();
   const connection = getConnection();
   const backendKeypair = getBackendKeypair();
   const [invoicePDA] = getInvoicePDA(invoiceId);
-  const [poolConfigPDA] = getPoolConfigPDA(riskLevel);
 
   // Create Token-2022 mint with invoice PDA as mint authority
   const invoiceMint = await createMint(
@@ -262,12 +261,10 @@ export async function createInvoice(
       debtor,
       new BN(dueDate),
       interestRateBps,
-      riskLevel,
       Array.from(documentHash)
     )
     .accounts({
       invoice: invoicePDA,
-      poolConfig: poolConfigPDA,
       invoiceMint: invoiceMint,
       authority: backendKeypair.publicKey,
       systemProgram: SystemProgram.programId,
@@ -330,33 +327,49 @@ export async function settleInvoice(invoiceId: string): Promise<string> {
   const [invoicePDA] = getInvoicePDA(invoiceId);
   const usdtMint = getUsdtMint();
 
-  const invoiceVault = getAssociatedTokenAddressSync(
-    usdtMint,
-    invoicePDA,
-    true,
-    TOKEN_2022_PROGRAM_ID
-  );
+  // Fetch invoice state to compute correct settlement amounts
+  const invoice = await (program.account as any).invoiceAccount.fetch(invoicePDA);
+  const createdAt: number = invoice.createdAt.toNumber();
+  const fundedAmount: number = invoice.fundedAmount.toNumber();
+  const totalSeniorFunded: number = invoice.totalSeniorFunded.toNumber();
+  const juniorFunded = fundedAmount - totalSeniorFunded;
 
-  // Ensure authority USDT ATA exists
-  const authorityAtaAccount = await getOrCreateAssociatedTokenAccount(
-    getConnection(),
-    backendKeypair,
-    usdtMint,
-    backendKeypair.publicKey,
-    false,
-    "confirmed",
-    undefined,
-    TOKEN_2022_PROGRAM_ID
+  // Fetch pool rates
+  const seniorPool = await getPoolConfig(0);
+  const juniorPool = await getPoolConfig(1);
+  const seniorRateBps = seniorPool?.baseRateBps ?? 500;
+  const juniorRateBps = juniorPool?.baseRateBps ?? 1200;
+
+  // Days elapsed (min 1 to match contract claim formula)
+  const nowSeconds = Math.floor(Date.now() / 1000);
+  const days = Math.max(1, Math.floor((nowSeconds - createdAt) / 86400));
+
+  // Per-tranche interest (integer math matching contract: / 365 / 10000)
+  const seniorInterest = Math.floor(totalSeniorFunded * seniorRateBps * days / 365 / 10000);
+  const juniorInterest = Math.floor(juniorFunded * juniorRateBps * days / 365 / 10000);
+  const seniorExpectedPayout = totalSeniorFunded + seniorInterest;
+  const juniorExpectedPayout = juniorFunded + juniorInterest;
+  const totalInvestorPayout = seniorExpectedPayout + juniorExpectedPayout;
+
+  // Vault currently holds 10% of funded amount (after 90% advance to creditor)
+  const vaultRetained = Math.floor(fundedAmount * (10000 - 9000) / 10000);
+  const amountToDeposit = Math.max(0, totalInvestorPayout - vaultRetained);
+
+  const invoiceVault = getAssociatedTokenAddressSync(
+    usdtMint, invoicePDA, true, TOKEN_2022_PROGRAM_ID
   );
-  const authorityUsdt = authorityAtaAccount.address;
+  const authorityAtaAccount = await getOrCreateAssociatedTokenAccount(
+    getConnection(), backendKeypair, usdtMint, backendKeypair.publicKey,
+    false, "confirmed", undefined, TOKEN_2022_PROGRAM_ID
+  );
 
   const tx = await program.methods
-    .settleInvoice(invoiceId)
+    .settleInvoice(invoiceId, new BN(amountToDeposit), new BN(seniorExpectedPayout))
     .accounts({
       invoice: invoicePDA,
       usdtMint: usdtMint,
       invoiceVault: invoiceVault,
-      authorityUsdt: authorityUsdt,
+      authorityUsdt: authorityAtaAccount.address,
       authority: backendKeypair.publicKey,
       tokenProgram: TOKEN_2022_PROGRAM_ID,
     })
@@ -395,5 +408,49 @@ export async function getInvoice(invoiceId: string) {
 
 export async function getAllInvoices() {
   const program = getProgram();
-  return await (program.account as any).invoiceAccount.all();
+  const connection = getConnection();
+
+  const discriminator: Buffer = (program.coder.accounts as any).accountDiscriminator("invoiceAccount");
+  const rawAccounts = await connection.getProgramAccounts(PROGRAM_ID, {
+    filters: [{ memcmp: { offset: 0, bytes: bs58.encode(discriminator) } }],
+  });
+
+  const results: { publicKey: PublicKey; account: any }[] = [];
+  for (const { pubkey, account } of rawAccounts) {
+    try {
+      const decoded = program.coder.accounts.decode("invoiceAccount", account.data);
+      results.push({ publicKey: pubkey, account: decoded });
+    } catch {
+      // stale account with old layout — skip
+    }
+  }
+  return results;
+}
+
+export async function getAllWhitelistEntries() {
+  const program = getProgram();
+  const connection = getConnection();
+
+  const discriminator: Buffer = (program.coder.accounts as any).accountDiscriminator("whitelistEntry");
+  const rawAccounts = await connection.getProgramAccounts(PROGRAM_ID, {
+    filters: [{ memcmp: { offset: 0, bytes: bs58.encode(discriminator) } }],
+  });
+
+  const results: any[] = [];
+  for (const { pubkey, account } of rawAccounts) {
+    try {
+      const decoded = program.coder.accounts.decode("whitelistEntry", account.data);
+      results.push({
+        wallet: decoded.wallet.toBase58(),
+        kycId: decoded.kycId,
+        countryCode: decoded.countryCode,
+        isActive: decoded.isActive,
+        whitelistedAt: decoded.whitelistedAt.toNumber(),
+        pubkey: pubkey.toBase58(),
+      });
+    } catch {
+      // skip stale
+    }
+  }
+  return results;
 }

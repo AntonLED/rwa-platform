@@ -202,7 +202,6 @@ describe("rwa-token", () => {
 
   it("5. Creates invoice with Token-2022 mint", async () => {
     const [invoicePDA] = getInvoicePDA(INVOICE_ID, program.programId);
-    const [poolConfigPDA] = getPoolConfigPDA(0, program.programId);
 
     invoiceMint = await createMint(
       connection,
@@ -225,12 +224,10 @@ describe("rwa-token", () => {
         debtor.publicKey,
         new BN(dueDate),
         600,
-        0,
         DOCUMENT_HASH
       )
       .accountsPartial({
         invoice: invoicePDA,
-        poolConfig: poolConfigPDA,
         invoiceMint: invoiceMint,
         authority: authority.publicKey,
         systemProgram: SystemProgram.programId,
@@ -327,18 +324,20 @@ describe("rwa-token", () => {
     expect(Number(account.amount)).to.equal(mintAmount);
   });
 
-  it("8. Funds invoice — investor deposits USDT, receives invoice tokens", async () => {
+  it("8. Funds invoice — investor deposits USDT, receives invoice tokens (Senior tranche)", async () => {
     const [invoicePDA] = getInvoicePDA(INVOICE_ID, program.programId);
     const [investorPositionPDA] = getInvestorPositionPDA(
       INVOICE_ID,
       investor.publicKey,
       program.programId
     );
+    const [poolConfigPDA] = getPoolConfigPDA(0, program.programId); // Senior tranche
 
     const txSig = await program.methods
-      .fundInvoice(INVOICE_ID, new BN(TOTAL_AMOUNT))
+      .fundInvoice(INVOICE_ID, new BN(TOTAL_AMOUNT), 0) // tranche=0 (Senior)
       .accountsPartial({
         invoice: invoicePDA,
+        poolConfig: poolConfigPDA,
         usdtMint: usdtMint,
         investorUsdt: investorUsdtAta,
         invoiceVault: invoiceVault,
@@ -379,6 +378,10 @@ describe("rwa-token", () => {
     );
     expect(position.amount.toNumber()).to.equal(TOTAL_AMOUNT);
     expect(position.claimed).to.be.false;
+    expect(position.tranche).to.equal(0); // Senior
+
+    const invoiceAfter = await program.account.invoiceAccount.fetch(invoicePDA);
+    expect(invoiceAfter.totalSeniorFunded.toNumber()).to.equal(TOTAL_AMOUNT);
   });
 
   it("9. Advances 90% to creditor", async () => {
@@ -421,24 +424,31 @@ describe("rwa-token", () => {
     );
   });
 
-  it("10. Settles invoice — authority deposits principal + interest", async () => {
+  it("10. Settles invoice — authority deposits per-tranche amounts", async () => {
     const [invoicePDA] = getInvoicePDA(INVOICE_ID, program.programId);
 
-    const repaymentBuffer = TOTAL_AMOUNT * 2;
+    // Test: 1 USDT funded entirely as Senior (tranche=0), rate=500bps, days=1 (min)
+    const SENIOR_RATE_BPS = 500;
+    const days = 1;
+    const seniorInterest = Math.floor(TOTAL_AMOUNT * SENIOR_RATE_BPS * days / 365 / 10000);
+    const seniorExpectedPayout = TOTAL_AMOUNT + seniorInterest;
+    const vaultRetained = Math.floor(TOTAL_AMOUNT * 1000 / 10000); // 10%
+    const amountToDeposit = seniorExpectedPayout - vaultRetained;
+
     await mintTo(
       connection,
       (authority as any).payer,
       usdtMint,
       authorityUsdtAta,
       authority.publicKey,
-      repaymentBuffer,
+      amountToDeposit * 2, // buffer
       [],
       { commitment: "confirmed" },
       TOKEN_2022_PROGRAM_ID
     );
 
     const settleTx = await program.methods
-      .settleInvoice(INVOICE_ID)
+      .settleInvoice(INVOICE_ID, new BN(amountToDeposit), new BN(seniorExpectedPayout))
       .accountsPartial({
         invoice: invoicePDA,
         usdtMint: usdtMint,
@@ -452,6 +462,8 @@ describe("rwa-token", () => {
 
     const invoice = await program.account.invoiceAccount.fetch(invoicePDA);
     expect(JSON.stringify(invoice.status)).to.contain("repaid");
+    expect(invoice.seniorExpectedPayout.toNumber()).to.equal(seniorExpectedPayout);
+    expect(invoice.settledAt.toNumber()).to.be.greaterThan(0);
   });
 
   it("11. Investor claims — burns tokens, receives USDT", async () => {
@@ -520,7 +532,6 @@ describe("rwa-token", () => {
 
   it("12. Marks a separate invoice as defaulted", async () => {
     const [invoicePDA2] = getInvoicePDA(INVOICE_ID_DEFAULT, program.programId);
-    const [poolConfigPDA] = getPoolConfigPDA(1, program.programId);
 
     invoiceMint2 = await createMint(
       connection,
@@ -543,12 +554,10 @@ describe("rwa-token", () => {
         debtor.publicKey,
         new BN(dueDate),
         1200,
-        1,
         DOCUMENT_HASH
       )
       .accountsPartial({
         invoice: invoicePDA2,
-        poolConfig: poolConfigPDA,
         invoiceMint: invoiceMint2,
         authority: authority.publicKey,
         systemProgram: SystemProgram.programId,
@@ -600,10 +609,13 @@ describe("rwa-token", () => {
       program.programId
     );
 
+    const [poolConfigPDA2] = getPoolConfigPDA(1, program.programId); // Junior tranche
+
     await program.methods
-      .fundInvoice(INVOICE_ID_DEFAULT, new BN(500_000))
+      .fundInvoice(INVOICE_ID_DEFAULT, new BN(500_000), 1) // tranche=1 (Junior)
       .accountsPartial({
         invoice: invoicePDA2,
+        poolConfig: poolConfigPDA2,
         usdtMint: usdtMint,
         investorUsdt: investorUsdtAta2,
         invoiceVault: invoiceVault2,

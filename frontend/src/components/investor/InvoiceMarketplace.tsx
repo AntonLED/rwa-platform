@@ -3,7 +3,6 @@ import { useNavigate } from "react-router-dom";
 import { useInvoiceProgram, Invoice } from "../../hooks/useInvoice";
 import { useRefreshListener } from "../../hooks/useRefresh";
 import StatusBadge from "../shared/StatusBadge";
-import RiskBadge from "../shared/RiskBadge";
 
 export default function InvoiceMarketplace() {
   const { fetchAllInvoices } = useInvoiceProgram();
@@ -66,7 +65,6 @@ export default function InvoiceMarketplace() {
                 </p>
               </div>
               <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
-                <RiskBadge riskLevel={inv.riskLevel} />
                 <StatusBadge status={inv.status} />
               </div>
             </div>

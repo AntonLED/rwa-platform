@@ -1,5 +1,5 @@
 {
-  "address": "GH9TPWVqa4UVNARHFBXadN5uwLMrhtE6obaHC9LFCKFz",
+  "address": "J5zLwZs3qmKv69Xd2eGmvbGf8PuCtKD5bh22dm9iZHre",
   "metadata": {
     "name": "rwa_token",
     "version": "0.1.0",
@@ -186,7 +186,10 @@
     {
       "name": "claim",
       "docs": [
-        "Investor burns tokens and claims USDT proportional share from vault"
+        "Investor burns tokens and claims USDT.",
+        "Payout = position.amount + interest calculated at position's tranche rate.",
+        "Senior (tranche=0) investors are paid first; Junior (tranche=1) can only",
+        "claim after senior_claimed >= senior_expected_payout."
       ],
       "discriminator": [
         62,
@@ -201,6 +204,7 @@
       "accounts": [
         {
           "name": "invoice",
+          "writable": true,
           "pda": {
             "seeds": [
               {
@@ -324,10 +328,6 @@
           }
         },
         {
-          "name": "pool_config",
-          "writable": true
-        },
-        {
           "name": "invoice_mint",
           "docs": [
             "Token-2022 mint for this invoice (created externally or via CPI)",
@@ -371,10 +371,6 @@
           "type": "u16"
         },
         {
-          "name": "risk_level",
-          "type": "u8"
-        },
-        {
           "name": "document_hash",
           "type": {
             "array": [
@@ -388,7 +384,8 @@
     {
       "name": "fund_invoice",
       "docs": [
-        "Investor deposits USDT and receives invoice tokens 1:1"
+        "Investor deposits USDT and receives invoice tokens 1:1",
+        "tranche: 0 = Senior (priority payout), 1 = Junior (subordinated)"
       ],
       "discriminator": [
         216,
@@ -424,6 +421,13 @@
               }
             ]
           }
+        },
+        {
+          "name": "pool_config",
+          "docs": [
+            "Investor's chosen tranche pool (Senior=0 or Junior=1)"
+          ],
+          "writable": true
         },
         {
           "name": "usdt_mint"
@@ -494,6 +498,10 @@
         {
           "name": "amount",
           "type": "u64"
+        },
+        {
+          "name": "tranche",
+          "type": "u8"
         }
       ]
     },
@@ -753,7 +761,9 @@
     {
       "name": "settle_invoice",
       "docs": [
-        "Backend confirms debtor has paid — deposits USDT into vault"
+        "Backend confirms debtor has paid — deposits exact amount into vault.",
+        "amount and senior_expected_payout are pre-calculated by the backend",
+        "based on each tranche's pool rate and elapsed days."
       ],
       "discriminator": [
         158,
@@ -820,6 +830,14 @@
         {
           "name": "invoice_id",
           "type": "string"
+        },
+        {
+          "name": "amount",
+          "type": "u64"
+        },
+        {
+          "name": "senior_expected_payout",
+          "type": "u64"
         }
       ]
     },
@@ -1207,6 +1225,16 @@
       "code": 6009,
       "name": "AlreadyClaimed",
       "msg": "Already claimed"
+    },
+    {
+      "code": 6010,
+      "name": "SeniorNotFullyPaid",
+      "msg": "Junior cannot claim before all Senior investors are paid"
+    },
+    {
+      "code": 6011,
+      "name": "InvalidTranche",
+      "msg": "Tranche must be 0 (Senior) or 1 (Junior)"
     }
   ],
   "types": [
@@ -1256,6 +1284,14 @@
             "type": "u64"
           },
           {
+            "name": "tranche",
+            "type": "u8"
+          },
+          {
+            "name": "interest_rate_bps",
+            "type": "u16"
+          },
+          {
             "name": "timestamp",
             "type": "i64"
           }
@@ -1288,6 +1324,14 @@
             "type": "bool"
           },
           {
+            "name": "tranche",
+            "type": "u8"
+          },
+          {
+            "name": "interest_rate_bps",
+            "type": "u16"
+          },
+          {
             "name": "bump",
             "type": "u8"
           }
@@ -1312,6 +1356,18 @@
             "type": "u64"
           },
           {
+            "name": "total_senior_funded",
+            "type": "u64"
+          },
+          {
+            "name": "senior_claimed",
+            "type": "u64"
+          },
+          {
+            "name": "senior_expected_payout",
+            "type": "u64"
+          },
+          {
             "name": "creditor",
             "type": "pubkey"
           },
@@ -1328,12 +1384,12 @@
             "type": "i64"
           },
           {
-            "name": "interest_rate_bps",
-            "type": "u16"
+            "name": "settled_at",
+            "type": "i64"
           },
           {
-            "name": "risk_level",
-            "type": "u8"
+            "name": "interest_rate_bps",
+            "type": "u16"
           },
           {
             "name": "document_hash",
@@ -1401,10 +1457,6 @@
             "type": "u16"
           },
           {
-            "name": "risk_level",
-            "type": "u8"
-          },
-          {
             "name": "document_hash",
             "type": {
               "array": [
@@ -1454,6 +1506,10 @@
             "type": "u64"
           },
           {
+            "name": "tranche",
+            "type": "u8"
+          },
+          {
             "name": "total_funded",
             "type": "u64"
           },
@@ -1478,7 +1534,7 @@
             "type": "u64"
           },
           {
-            "name": "interest",
+            "name": "senior_expected_payout",
             "type": "u64"
           },
           {

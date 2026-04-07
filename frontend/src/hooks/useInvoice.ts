@@ -10,26 +10,28 @@ import {
 import { useCallback, useMemo, useState } from "react";
 import idl from "../idl/rwa_token.json";
 
-const PROGRAM_ID = new PublicKey("GH9TPWVqa4UVNARHFBXadN5uwLMrhtE6obaHC9LFCKFz");
+const PROGRAM_ID = new PublicKey("J5zLwZs3qmKv69Xd2eGmvbGf8PuCtKD5bh22dm9iZHre");
 
 // Devnet USDT mint
-export const USDT_MINT = new PublicKey("FJnMByeAJRZeVCsRUG7uXwNmN4vpe9vebTuuQxCDTnzq");
+export const USDT_MINT = new PublicKey("GRE3zyQxjyuGchnoLZhS8p8YYNxg5TQtLf9GX2Y9yZ8D");
 // export const USDT_MINT = new PublicKey("JD2RSTTxd6YEqak253jD4sq8L15xjBV3oSm9DHHSywQg");
 
 const INVOICE_SEED = Buffer.from("invoice");
 const INVESTOR_SEED = Buffer.from("investor");
+const POOL_CONFIG_SEED = Buffer.from("pool_config");
 
 export interface Invoice {
   publicKey: string;
   invoiceId: string;
   totalAmount: string;
   fundedAmount: string;
+  totalSeniorFunded: string;
+  seniorClaimed: string;
   creditor: string;
   debtor: string;
   dueDate: number;
   createdAt: number;
   interestRateBps: number;
-  riskLevel: number;
   documentHash: string;
   advancePaid: boolean;
   status: string;
@@ -77,13 +79,18 @@ export function useInvoiceProgram() {
       invoiceId: string,
       amount: number,
       usdtMint: PublicKey,
-      invoiceMint: PublicKey
+      invoiceMint: PublicKey,
+      tranche: number  // 0 = Senior, 1 = Junior
     ): Promise<string> => {
       if (!program || !wallet.publicKey) throw new Error("Wallet not connected");
       setLoading(true);
       try {
         const [invoicePda] = PublicKey.findProgramAddressSync(
           [INVOICE_SEED, Buffer.from(invoiceId)],
+          PROGRAM_ID
+        );
+        const [poolConfigPda] = PublicKey.findProgramAddressSync(
+          [POOL_CONFIG_SEED, Buffer.from([tranche])],
           PROGRAM_ID
         );
         const [investorPosition] = PublicKey.findProgramAddressSync(
@@ -104,6 +111,7 @@ export function useInvoiceProgram() {
         const preIxs = [];
         const conn = program.provider.connection;
         for (const { mint, owner, ata } of [
+          { mint: usdtMint, owner: wallet.publicKey, ata: investorUsdt },
           { mint: usdtMint, owner: invoicePda, ata: invoiceVault },
           { mint: invoiceMint, owner: wallet.publicKey, ata: investorInvoiceTokens },
         ]) {
@@ -119,9 +127,10 @@ export function useInvoiceProgram() {
         }
 
         const tx = await (program.methods as any)
-          .fundInvoice(invoiceId, new BN(amount))
+          .fundInvoice(invoiceId, new BN(amount), tranche)
           .accounts({
             invoice: invoicePda,
+            poolConfig: poolConfigPda,
             usdtMint,
             investorUsdt,
             invoiceVault,
@@ -133,7 +142,7 @@ export function useInvoiceProgram() {
             systemProgram: SystemProgram.programId,
           })
           .preInstructions(preIxs)
-          .rpc();
+          .rpc({ skipPreflight: true });
         return tx;
       } finally {
         setLoading(false);
@@ -178,7 +187,7 @@ export function useInvoiceProgram() {
             investor: wallet.publicKey,
             tokenProgram: TOKEN_2022_PROGRAM_ID,
           })
-          .rpc();
+          .rpc({ skipPreflight: true });
         return tx;
       } finally {
         setLoading(false);

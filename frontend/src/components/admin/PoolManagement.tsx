@@ -3,15 +3,11 @@ import { usePool } from "../../hooks/usePool";
 import { useRefreshListener } from "../../hooks/useRefresh";
 
 export default function PoolManagement() {
-  const { fetchPools, initPool } = usePool();
-  const [pools, setPools] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { pools, loading, fetchPools, initPool } = usePool();
   const [initResult, setInitResult] = useState<string | null>(null);
   const tick = useRefreshListener();
 
-  useEffect(() => {
-    fetchPools().then(setPools).finally(() => setLoading(false));
-  }, [tick]);
+  useEffect(() => { fetchPools(); }, [tick]);
 
   async function handleInit(riskLevel: number) {
     try {
@@ -35,15 +31,19 @@ export default function PoolManagement() {
         <div className="table-wrap">
           <table>
             <thead>
-              <tr><th>Risk Level</th><th>Base Rate</th><th>Markup</th><th>Total Invoices</th><th>Total Funded</th></tr>
+              <tr><th>Tranche</th><th>Investor APY</th><th>Platform Markup</th><th>Advance Rate</th><th>Total Funded</th></tr>
             </thead>
             <tbody>
               {pools.map(p => (
                 <tr key={p.riskLevel}>
-                  <td>{p.riskLevel === 0 ? <span className="badge badge-green">Low Risk</span> : <span className="badge badge-red">High Risk</span>}</td>
+                  <td>
+                    {p.riskLevel === 0
+                      ? <span className="badge badge-green">Senior Tranche</span>
+                      : <span className="badge badge-yellow">Junior Tranche</span>}
+                  </td>
                   <td style={{ fontWeight:600 }}>{p.baseRateBps / 100}%</td>
                   <td>{p.markupBps / 100}%</td>
-                  <td>{p.totalInvoices}</td>
+                  <td>90% <span style={{ fontSize:"var(--text-xs)", color:"var(--text-muted)" }}>(10% retention)</span></td>
                   <td><strong>{(Number(p.totalFunded) / 1e6).toLocaleString()}</strong> USDT</td>
                 </tr>
               ))}
@@ -54,9 +54,9 @@ export default function PoolManagement() {
       <div className="card">
         <h3 style={{ fontSize:"var(--text-base)", fontWeight:600, marginBottom:"var(--space-4)" }}>Initialize Pools</h3>
         <div style={{ display:"flex", gap:"var(--space-3)" }}>
-          {!hasLow && <button className="btn btn-primary" onClick={() => handleInit(0)}>🟢 Initialize Low Risk Pool</button>}
-          {!hasHigh && <button className="btn btn-primary" onClick={() => handleInit(1)}>🔴 Initialize High Risk Pool</button>}
-          {hasLow && hasHigh && <div className="alert alert-success">✓ Both pools are initialized and active.</div>}
+          {!hasLow && <button className="btn btn-primary" onClick={() => handleInit(0)}>Initialize Senior Tranche Pool</button>}
+          {!hasHigh && <button className="btn btn-primary" onClick={() => handleInit(1)}>Initialize Junior Tranche Pool</button>}
+          {hasLow && hasHigh && <div className="alert alert-success">✓ Both tranches are initialized and active.</div>}
         </div>
         {initResult && <div className="alert alert-info" style={{ marginTop:"var(--space-3)" }}>{initResult}</div>}
       </div>

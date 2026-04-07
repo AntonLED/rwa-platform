@@ -3,7 +3,6 @@ import { useWallet } from "@solana/wallet-adapter-react";
 import { useInvoiceProgram, Invoice } from "../../hooks/useInvoice";
 import { useRefreshListener } from "../../hooks/useRefresh";
 import StatusBadge from "../shared/StatusBadge";
-import RiskBadge from "../shared/RiskBadge";
 import SubmitInvoice from "./SubmitInvoice";
 import EdoImport from "./EdoImport";
 
@@ -151,7 +150,7 @@ export default function CreditorDashboard() {
                         </div>
                       </td>
                       <td><StatusBadge status={inv.status} /></td>
-                      <td><RiskBadge riskLevel={inv.riskLevel} /></td>
+                      <td style={{ color: "var(--success)", fontWeight: 600 }}>{inv.interestRateBps / 100}% APY</td>
                       <td style={{ fontSize: "var(--text-xs)" }}>{new Date(inv.dueDate * 1000).toLocaleDateString()}</td>
                       <td>{inv.advancePaid ? <span className="badge badge-green">✓ Paid</span> : <span className="badge badge-gray">Pending</span>}</td>
                     </tr>

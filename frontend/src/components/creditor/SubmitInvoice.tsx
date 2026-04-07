@@ -10,7 +10,6 @@ export default function SubmitInvoice({ preFill, onClearPreFill }: Props) {
   const [debtorName, setDebtorName] = useState(preFill?.debtorName || "");
   const [amount, setAmount] = useState(preFill?.amount?.toString() || "");
   const [dueDate, setDueDate] = useState(preFill?.dueDate || "");
-  const [riskLevel, setRiskLevel] = useState(0);
   const [file, setFile] = useState<File | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState<any>(null);
@@ -33,7 +32,7 @@ export default function SubmitInvoice({ preFill, onClearPreFill }: Props) {
       });
       const res = await fetch("/api/invoices", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ creditorWallet: publicKey.toBase58(), debtorName, amount: Number(amount), dueDate, riskLevel, documentBase64: base64 }),
+        body: JSON.stringify({ creditorWallet: publicKey.toBase58(), debtorName, amount: Number(amount), dueDate, documentBase64: base64 }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to create invoice");
@@ -61,12 +60,10 @@ export default function SubmitInvoice({ preFill, onClearPreFill }: Props) {
           <label className="input-label">Payment Due Date *</label>
           <input className="input" type="date" value={dueDate} onChange={e => setDueDate(e.target.value)} required />
         </div>
-        <div className="input-group">
-          <label className="input-label">Risk Level</label>
-          <select className="input" value={riskLevel} onChange={e => setRiskLevel(Number(e.target.value))}>
-            <option value={0}>🟢 Low Risk — 5% APY for investors</option>
-            <option value={1}>🔴 High Risk — 12% APY for investors</option>
-          </select>
+        <div className="card" style={{ background: "var(--surface-offset)", padding: "var(--space-3) var(--space-4)" }}>
+          <p style={{ fontSize: "var(--text-xs)", color: "var(--text-muted)", lineHeight: 1.5 }}>
+            Risk classification and investor tranche assignment is determined by the platform based on invoice parameters.
+          </p>
         </div>
 
         {/* FILE UPLOAD */}

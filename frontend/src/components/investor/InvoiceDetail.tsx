@@ -1,22 +1,25 @@
 import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { useWallet } from "@solana/wallet-adapter-react";
+import { useWallet, useConnection } from "@solana/wallet-adapter-react";
 import { PublicKey } from "@solana/web3.js";
-import { useInvoiceProgram, Invoice } from "../../hooks/useInvoice";
+import { getAssociatedTokenAddressSync, getAccount, TOKEN_2022_PROGRAM_ID } from "@solana/spl-token";
+import { useInvoiceProgram, Invoice, USDT_MINT } from "../../hooks/useInvoice";
+import { usePool } from "../../hooks/usePool";
 import { emitRefresh } from "../../hooks/useRefresh";
 import StatusBadge from "../shared/StatusBadge";
-import RiskBadge from "../shared/RiskBadge";
-
-const USDT_MINT = new PublicKey("Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB");
 
 export default function InvoiceDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { publicKey } = useWallet();
+  const { connection } = useConnection();
   const { fetchInvoice, fundInvoice } = useInvoiceProgram();
+  const { pools } = usePool();
   const [invoice, setInvoice] = useState<Invoice | null>(null);
   const [loading, setLoading] = useState(true);
+  const [usdtBalance, setUsdtBalance] = useState<number | null>(null);
   const [amount, setAmount] = useState("");
+  const [tranche, setTranche] = useState<0 | 1>(0);
   const [txResult, setTxResult] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [funding, setFunding] = useState(false);
@@ -24,6 +27,14 @@ export default function InvoiceDetail() {
   useEffect(() => {
     if (id) fetchInvoice(id).then(setInvoice).finally(() => setLoading(false));
   }, [id]);
+
+  useEffect(() => {
+    if (!publicKey) return;
+    const ata = getAssociatedTokenAddressSync(USDT_MINT, publicKey, false, TOKEN_2022_PROGRAM_ID);
+    getAccount(connection, ata, "confirmed", TOKEN_2022_PROGRAM_ID)
+      .then(acc => setUsdtBalance(Number(acc.amount) / 1e6))
+      .catch(() => setUsdtBalance(0));
+  }, [publicKey, txResult]);
 
   if (loading) return (
     <div className="card" style={{ display: "flex", flexDirection: "column", gap: "var(--space-4)" }}>
@@ -38,7 +49,11 @@ export default function InvoiceDetail() {
   const funded = Number(invoice.fundedAmount) / 1e6;
   const remaining = total - funded;
   const pct = total > 0 ? (funded / total) * 100 : 0;
-  const apy = invoice.interestRateBps / 100;
+
+  // Per-tranche APY from pool config
+  const seniorApy = (pools.find(p => p.riskLevel === 0)?.baseRateBps ?? 500) / 100;
+  const juniorApy = (pools.find(p => p.riskLevel === 1)?.baseRateBps ?? 1200) / 100;
+  const selectedApy = tranche === 0 ? seniorApy : juniorApy;
 
   async function handleFund(e: React.FormEvent) {
     e.preventDefault();
@@ -47,7 +62,7 @@ export default function InvoiceDetail() {
     try {
       const amountLamports = Math.floor(Number(amount) * 1e6);
       const invoiceMint = new PublicKey(invoice!.mint);
-      const tx = await fundInvoice(id, amountLamports, USDT_MINT, invoiceMint);
+      const tx = await fundInvoice(id, amountLamports, USDT_MINT, invoiceMint, tranche);
       setTxResult(tx);
       emitRefresh();
     } catch (e: any) { setError(e.message); }
@@ -85,7 +100,6 @@ export default function InvoiceDetail() {
                 <p style={{ fontSize: "var(--text-sm)", color: "var(--text-muted)" }}>RWA-backed invoice on Solana</p>
               </div>
               <div style={{ display: "flex", gap: "var(--space-2)" }}>
-                <RiskBadge riskLevel={invoice.riskLevel} />
                 <StatusBadge status={invoice.status} />
               </div>
             </div>
@@ -133,12 +147,18 @@ export default function InvoiceDetail() {
         {/* RIGHT */}
         <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-4)" }}>
           <div className="card" style={{
-            background: "linear-gradient(135deg, var(--primary) 0%, color-mix(in oklch, var(--primary) 70%, #1a4a7a) 100%)",
-            color: "var(--primary-fg)", textAlign: "center", padding: "var(--space-8)",
+            background: tranche === 0
+              ? "linear-gradient(135deg, var(--success) 0%, color-mix(in oklch, var(--success) 70%, #004d2e) 100%)"
+              : "linear-gradient(135deg, #d97706 0%, #92400e 100%)",
+            color: "#fff", textAlign: "center", padding: "var(--space-8)",
           }}>
-            <p style={{ fontSize: "var(--text-xs)", opacity: 0.8, fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.1em" }}>Annual Yield</p>
-            <p style={{ fontSize: "var(--text-xl)", fontWeight: 700, lineHeight: 1 }}>{apy}%</p>
-            <p style={{ fontSize: "var(--text-xs)", opacity: 0.7, marginTop: "var(--space-1)" }}>Real yield · Not speculative</p>
+            <p style={{ fontSize: "var(--text-xs)", opacity: 0.85, fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.1em" }}>
+              {tranche === 0 ? "Senior Tranche APY" : "Junior Tranche APY"}
+            </p>
+            <p style={{ fontSize: "var(--text-xl)", fontWeight: 700, lineHeight: 1 }}>{selectedApy}%</p>
+            <p style={{ fontSize: "var(--text-xs)", opacity: 0.75, marginTop: "var(--space-1)" }}>
+              {tranche === 0 ? "Priority payout · Lower risk" : "Subordinated · Higher yield"}
+            </p>
           </div>
 
           <div className="card">
@@ -148,6 +168,32 @@ export default function InvoiceDetail() {
             ) : (
               <form onSubmit={handleFund} style={{ display: "flex", flexDirection: "column", gap: "var(--space-4)" }}>
                 <div className="input-group">
+                  <label className="input-label">Choose Tranche</label>
+                  {([
+                    { value: 0 as const, label: "Senior Tranche", desc: `${seniorApy}% APY · Priority payout in default`, color: "var(--success)" },
+                    { value: 1 as const, label: "Junior Tranche", desc: `${juniorApy}% APY · Subordinated, higher yield`, color: "var(--warning)" },
+                  ]).map(t => (
+                    <div
+                      key={t.value}
+                      onClick={() => setTranche(t.value)}
+                      style={{
+                        display: "flex", alignItems: "center", gap: "var(--space-3)",
+                        padding: "var(--space-3) var(--space-4)", marginBottom: "var(--space-2)",
+                        borderRadius: "var(--radius-lg)", cursor: "pointer",
+                        border: `2px solid ${tranche === t.value ? t.color : "var(--border)"}`,
+                        background: tranche === t.value ? `color-mix(in oklch, ${t.color} 10%, transparent)` : "var(--surface-offset)",
+                        transition: "all var(--transition)",
+                      }}
+                    >
+                      <div style={{ width: 16, height: 16, borderRadius: "50%", border: `2px solid ${t.color}`, background: tranche === t.value ? t.color : "transparent", flexShrink: 0 }} />
+                      <div>
+                        <p style={{ fontSize: "var(--text-sm)", fontWeight: 600, color: "var(--text)" }}>{t.label}</p>
+                        <p style={{ fontSize: "var(--text-xs)", color: "var(--text-muted)" }}>{t.desc}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <div className="input-group">
                   <label className="input-label">Amount (USDT)</label>
                   <input
                     className="input" type="number"
@@ -155,12 +201,19 @@ export default function InvoiceDetail() {
                     value={amount} onChange={e => setAmount(e.target.value)}
                     min="1" max={remaining} step="0.01" required
                   />
-                  <span style={{ fontSize: "var(--text-xs)", color: "var(--text-muted)" }}>Available: {remaining.toLocaleString()} USDT</span>
+                  <span style={{ fontSize: "var(--text-xs)", color: "var(--text-muted)" }}>
+                    Invoice remaining: {remaining.toLocaleString()} USDT
+                    {usdtBalance !== null && (
+                      <span style={{ marginLeft: 8, color: usdtBalance > 0 ? "var(--success)" : "var(--error)" }}>
+                        · Your balance: {usdtBalance.toLocaleString()} USDT
+                      </span>
+                    )}
+                  </span>
                 </div>
                 {amount && Number(amount) > 0 && (
                   <div style={{ background: "var(--success-subtle)", borderRadius: "var(--radius-lg)", padding: "var(--space-3) var(--space-4)" }}>
                     <p style={{ fontSize: "var(--text-xs)", color: "var(--success)", fontWeight: 500 }}>
-                      Estimated return: ~{(Number(amount) * apy / 100 * (invoice.dueDate * 1000 - Date.now()) / 31536000000).toFixed(2)} USDT
+                      Estimated return: ~{(Number(amount) * selectedApy / 100 * Math.max(1, (invoice.dueDate * 1000 - Date.now()) / 31536000000)).toFixed(2)} USDT
                     </p>
                   </div>
                 )}
@@ -174,9 +227,10 @@ export default function InvoiceDetail() {
           </div>
 
           <div className="card" style={{ background: "var(--surface-offset)" }}>
-            <p style={{ fontSize: "var(--text-xs)", fontWeight: 600, marginBottom: "var(--space-2)" }}>🛡 Default Protection</p>
+            <p style={{ fontSize: "var(--text-xs)", fontWeight: 600, marginBottom: "var(--space-2)" }}>🛡 Waterfall Default Protection</p>
             <p style={{ fontSize: "var(--text-xs)", color: "var(--text-muted)", lineHeight: 1.6 }}>
-              In case of debtor default, the platform's Risk Reserve activates a Waterfall mechanism — investors are compensated first.
+              <strong style={{ color: "var(--success)" }}>Senior tranche</strong> investors are paid first from any recovery proceeds.{" "}
+              <strong style={{ color: "var(--warning)" }}>Junior tranche</strong> investors receive the remainder after Senior is fully settled.
             </p>
           </div>
         </div>

@@ -6,10 +6,10 @@ resolution = true
 skip-lint = false
 
 [programs.devnet]
-rwa_token = "GH9TPWVqa4UVNARHFBXadN5uwLMrhtE6obaHC9LFCKFz"
+rwa_token = "J5zLwZs3qmKv69Xd2eGmvbGf8PuCtKD5bh22dm9iZHre"
 
 [programs.localnet]
-rwa_token = "GH9TPWVqa4UVNARHFBXadN5uwLMrhtE6obaHC9LFCKFz"
+rwa_token = "J5zLwZs3qmKv69Xd2eGmvbGf8PuCtKD5bh22dm9iZHre"
 
 [registry]
 url = "https://api.apr.dev"

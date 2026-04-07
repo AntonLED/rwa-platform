@@ -17,6 +17,30 @@ export default function Header() {
   const location = useLocation();
   const navigate = useNavigate();
   const [showKyc, setShowKyc] = useState(false);
+  const [fauceting, setFauceting] = useState(false);
+  const [faucetMsg, setFaucetMsg] = useState<string | null>(null);
+
+  async function handleFaucet() {
+    if (!publicKey) return;
+    setFauceting(true);
+    setFaucetMsg(null);
+    try {
+      const res = await fetch("/api/faucet", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ wallet: publicKey.toBase58() }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      setFaucetMsg(`+${data.amount.toLocaleString()} USDT`);
+      setTimeout(() => setFaucetMsg(null), 3000);
+    } catch (e: any) {
+      setFaucetMsg(`Error: ${e.message}`);
+      setTimeout(() => setFaucetMsg(null), 4000);
+    } finally {
+      setFauceting(false);
+    }
+  }
   const [theme, setTheme] = useState<"light" | "dark">(() =>
     window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"
   );
@@ -74,6 +98,24 @@ export default function Header() {
           </nav>
 
           <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: "var(--space-3)" }}>
+            {/* DEVNET FAUCET */}
+            {publicKey && (
+              <button
+                onClick={handleFaucet}
+                disabled={fauceting}
+                style={{
+                  padding: "4px 12px", borderRadius: "var(--radius-lg)",
+                  fontSize: "var(--text-xs)", fontWeight: 600,
+                  background: "var(--surface-offset)", border: "1px solid var(--border)",
+                  color: "var(--text-muted)", cursor: fauceting ? "not-allowed" : "pointer",
+                  transition: "all var(--transition)",
+                }}
+                title="Get 10 000 mock USDT (devnet)"
+              >
+                {fauceting ? "Minting..." : faucetMsg ?? "💧 Get USDT"}
+              </button>
+            )}
+
             {/* KYC STATUS */}
             {publicKey && (
               <button

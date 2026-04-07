@@ -8,6 +8,7 @@ import { whitelistRouter } from "./api/whitelist";
 import { invoiceRouter } from "./api/invoice";
 import { poolRouter } from "./api/pool";
 import { edoRouter } from "./api/edo";
+import { faucetRouter } from "./api/faucet";
 import logger from "./lib/logger";
 
 const app = express();
@@ -26,6 +27,7 @@ app.use(whitelistRouter);
 app.use(invoiceRouter);
 app.use(poolRouter);
 app.use(edoRouter);
+app.use(faucetRouter);
 
 app.get("/health", (_req, res) => res.json({ ok: true }));
 

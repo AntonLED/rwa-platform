@@ -38,12 +38,13 @@ function formatInvoice(raw: any) {
     invoiceId: raw.invoiceId,
     totalAmount: raw.totalAmount?.toString(),
     fundedAmount: raw.fundedAmount?.toString(),
+    totalSeniorFunded: raw.totalSeniorFunded?.toString(),
+    seniorClaimed: raw.seniorClaimed?.toString(),
     creditor: raw.creditor?.toString(),
     debtor: raw.debtor?.toString(),
     dueDate: raw.dueDate?.toNumber?.() ?? raw.dueDate,
     createdAt: raw.createdAt?.toNumber?.() ?? raw.createdAt,
     interestRateBps: raw.interestRateBps,
-    riskLevel: raw.riskLevel,
     documentHash: Buffer.from(raw.documentHash).toString("hex"),
     advancePaid: raw.advancePaid,
     status,
@@ -54,12 +55,14 @@ function formatInvoice(raw: any) {
 
 // ── POST /api/invoices — создание инвойса ─────────────────────────────────
 
+// Interest rate: platform calculates based on amount (MVP: fixed 7%)
+const INTEREST_RATE_BPS = 700;
+
 const CreateInvoiceSchema = z.object({
   creditorWallet: z.string().min(32).max(44),
   debtorName: z.string().min(1).max(100),
   amount: z.number().positive(),
   dueDate: z.string().or(z.number()),
-  riskLevel: z.number().int().min(0).max(1),
   documentBase64: z.string().min(1),
 });
 
@@ -70,13 +73,10 @@ invoiceRouter.post("/api/invoices", async (req, res) => {
     return;
   }
 
-  const { creditorWallet, debtorName, amount, dueDate, riskLevel, documentBase64 } =
-    parsed.data;
+  const { creditorWallet, debtorName, amount, dueDate, documentBase64 } = parsed.data;
 
   try {
     const creditor = new PublicKey(creditorWallet);
-    // For debtor we use a deterministic "virtual" key derived from the name
-    // In production this would be a real wallet — for hackathon we use PublicKey.default()
     const debtor = PublicKey.default;
 
     const dueDateUnix =
@@ -94,8 +94,7 @@ invoiceRouter.post("/api/invoices", async (req, res) => {
       creditor,
       debtor,
       dueDateUnix,
-      riskLevel === 0 ? 500 : 1200, // 5% low risk, 12% high risk default
-      riskLevel,
+      INTEREST_RATE_BPS,
       documentHash
     );
 
@@ -107,7 +106,7 @@ invoiceRouter.post("/api/invoices", async (req, res) => {
       totalAmount: amountLamports,
       creditor: creditorWallet,
       debtorName,
-      riskLevel,
+      interestRateBps: INTEREST_RATE_BPS,
       documentHash: Buffer.from(documentHash).toString("hex"),
     });
   } catch (err: any) {
