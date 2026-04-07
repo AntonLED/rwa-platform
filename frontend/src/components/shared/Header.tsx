@@ -3,6 +3,7 @@ import { WalletMultiButton } from "@solana/wallet-adapter-react-ui";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useRole, Role } from "../../hooks/useRole";
 import { useRef, useState, useEffect } from "react";
+import { useWhitelist } from "../../hooks/useWhitelist";
 import KycOnboarding from "../KycOnboarding";
 
 const NAV: { path: string; label: string; role: Role; emoji: string }[] = [
@@ -17,6 +18,7 @@ export default function Header() {
   const location = useLocation();
   const navigate = useNavigate();
   const [showKyc, setShowKyc] = useState(false);
+  const { isWhitelisted, refetch: refetchWhitelist } = useWhitelist(publicKey?.toBase58());
   const [fauceting, setFauceting] = useState(false);
   const [faucetMsg, setFaucetMsg] = useState<string | null>(null);
 
@@ -44,7 +46,6 @@ export default function Header() {
   const [theme, setTheme] = useState<"light" | "dark">(() =>
     window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"
   );
-  const refetchWhitelistRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", theme);
@@ -118,13 +119,23 @@ export default function Header() {
 
             {/* KYC STATUS */}
             {publicKey && (
-              <button
-                onClick={() => setShowKyc(!showKyc)}
-                className="badge badge-green"
-                style={{ cursor: "pointer", border: "none" }}
-              >
-                ✓ KYC Verified · KZ
-              </button>
+              isWhitelisted ? (
+                <button
+                  onClick={() => setShowKyc(!showKyc)}
+                  className="badge badge-green"
+                  style={{ cursor: "pointer", border: "none" }}
+                >
+                  ✓ KYC Verified
+                </button>
+              ) : (
+                <button
+                  onClick={() => setShowKyc(true)}
+                  className="badge badge-yellow"
+                  style={{ cursor: "pointer", border: "none" }}
+                >
+                  ⚠ KYC Required
+                </button>
+              )
             )}
 
             {/* THEME TOGGLE */}
@@ -158,7 +169,7 @@ export default function Header() {
           <div style={{ background: "var(--primary-subtle)", borderTop: "1px solid var(--divider)", padding: "var(--space-3) var(--space-6)" }}>
             <KycOnboarding
               wallet={publicKey.toBase58()}
-              onKycComplete={() => { refetchWhitelistRef.current?.(); setShowKyc(false); }}
+              onKycComplete={() => { refetchWhitelist(); setShowKyc(false); }}
             />
           </div>
         )}

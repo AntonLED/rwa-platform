@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useInvoiceProgram, Invoice } from "../../hooks/useInvoice";
-import { useRefreshListener } from "../../hooks/useRefresh";
+import { useRefreshListener, emitRefresh } from "../../hooks/useRefresh";
 import StatusBadge from "../shared/StatusBadge";
 
 export default function InvoiceManagement() {
@@ -18,6 +18,7 @@ export default function InvoiceManagement() {
     try {
       const tx = await fn();
       setActionResult(p => ({ ...p, [id]: `✓ TX: ${tx.slice(0, 16)}...` }));
+      emitRefresh();
     } catch (e: any) {
       setActionResult(p => ({ ...p, [id]: `⚠ ${e.message}` }));
     }

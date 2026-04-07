@@ -69,9 +69,9 @@ export function useInvoiceProgram() {
   }, []);
 
   const isWhitelisted = useCallback(async (walletAddress: string): Promise<boolean> => {
-    const res = await fetch(`/api/kyc/status/${walletAddress}`);
+    const res = await fetch(`/api/whitelist/${walletAddress}`);
     const data = await res.json();
-    return data.isWhitelisted ?? false;
+    return data.active ?? false;
   }, []);
 
   const fundInvoice = useCallback(

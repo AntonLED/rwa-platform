@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useRefreshListener } from "../../hooks/useRefresh";
+import { useRefreshListener, emitRefresh } from "../../hooks/useRefresh";
 
 interface WhitelistEntry {
   wallet: string;
@@ -39,6 +39,7 @@ export default function WhitelistManagement() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
       setEntries(prev => prev.map(e => e.wallet === wallet ? { ...e, isActive: false } : e));
+      emitRefresh();
     } catch (e: any) {
       setError(e.message);
     } finally {
