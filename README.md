@@ -14,12 +14,12 @@
 
 ## Submission to 2026 Solana National Hackathon
 
-| Name | Role | Contact |
+| Name | Role | Telegram |
 |------|------|---------|
-| Dmitry Osipov | Full-Stack Blockchain Engineer |   [telegram](@oscreed) |
-| Vladislav Pakhomov | Business Analyst / Bizdev Lead |  [telegram](@riveretosango) |
-| Andrey Basharov | Product Lead | [telegram](@ph_andreyy)  |
-| Anton Ledrov | Full-Stack Blockchain Engineer | [telegram](@lEdrov13) |
+| Dmitry Osipov | Full-Stack Blockchain Engineer |   @oscreed |
+| Vladislav Pakhomov | Business Analyst / Bizdev Lead |  @riveretosango |
+| Andrey Basharov | Product Lead | @ph_andreyy |
+| Anton Ledrov | Full-Stack Blockchain Engineer | @lEdrov13 |
 
 ---
 
