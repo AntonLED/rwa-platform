@@ -43,3 +43,5 @@ Thumbs.db
 *.njsproj
 *.sln
 .claude
+
+old.*

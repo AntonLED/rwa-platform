@@ -102,6 +102,7 @@ export default function Landing() {
           maxWidth: 800, marginBottom: 24,
         }}>
           Real-World Assets{" "}
+          <br />
           <span style={{
             background: "linear-gradient(135deg, #10b981 0%, #06b6d4 100%)",
             WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent",
