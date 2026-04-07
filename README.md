@@ -13,7 +13,7 @@
 │  Кошелёк: Phantom через @solana/wallet-adapter           │
 ├─────────────────────────────────────────────────────────┤
 │  Backend (Express + TypeScript)                          │
-│  KYC: Sumsub WebSDK + Webhooks                          │
+│  KYC: Sumsub WebSDK + Webhooks (мок-режим без ключей)   │
 │  EDO: Мок электронного документооборота (Казахстан)      │
 ├─────────────────────────────────────────────────────────┤
 │  Solana Program (Anchor 0.31, Token-2022)               │
@@ -26,13 +26,13 @@
 | Смарт-контракт | Rust + Anchor 0.31, Token-2022 (TransferHook, MetadataPointer) |
 | Бэкенд | Node.js + TypeScript + Express, @coral-xyz/anchor, Sumsub |
 | Фронтенд | React 18 + Vite + @solana/wallet-adapter + react-router-dom |
-| KYC | Sumsub WebSDK + Webhook |
+| KYC | Sumsub WebSDK + Webhook (mock-режим для devnet) |
 
 ## Бизнес-флоу
 
 ```
 1. Кредитор загружает инвойс (или импортирует из ЭДО)
-   → хэш документа сохраняется on-chain, создаётся Token-2022 mint
+   → хэш документа сохраняется on-chain, создаётся Token-2022 mint с метаданными
 
 2. Инвесторы просматривают маркетплейс, выбирают транш (Senior 5% / Junior 12%) и финансируют через USDT
    → получают invoice-токены 1:1 (Token-2022)
@@ -54,7 +54,7 @@
 | Extension | Использование |
 |---|---|
 | **TransferHook** | Каждый трансфер токенов проверяет KYC whitelist; revert с `NotKyced` если получатель не верифицирован |
-| **MetadataPointer** | Метаданные инвойса привязаны к on-chain аккаунтам |
+| **MetadataPointer** | Embedded metadata (name, symbol) — токены корректно отображаются в Phantom и других кошельках |
 
 ## PDA программы
 
@@ -62,7 +62,7 @@
 |---|---|---|
 | WhitelistRegistry | `["whitelist_registry"]` | Синглтон — authority + счётчик верифицированных |
 | WhitelistEntry | `["whitelist_entry", wallet]` | KYC-запись кошелька (kyc_id, country_code, is_active) |
-| PoolConfig | `["pool_config", risk_level]` | Конфиг пула риска (base_rate_bps, markup_bps) |
+| PoolConfig | `["pool_config", risk_level]` | Конфиг пула: Senior (0) = 5%, Junior (1) = 12% |
 | InvoiceAccount | `["invoice", invoice_id]` | Состояние инвойса, authority vault, ссылка на mint |
 | InvestorPosition | `["investor", invoice_id, wallet]` | Запись инвестора: сумма, транш (Senior/Junior), ставка, статус claim |
 
@@ -77,7 +77,7 @@ Funding → Funded → Advanced → Repaid → (Investor Claims)
 
 | Метод | Путь | Описание |
 |---|---|---|
-| `POST` | `/api/kyc/token` | Получить SDK-токен для Sumsub WebSDK |
+| `POST` | `/api/kyc/token` | KYC: Sumsub SDK-токен или mock-одобрение |
 | `GET` | `/api/whitelist` | Список всех KYC-записей (Admin) |
 | `GET` | `/api/whitelist/:wallet` | Проверить on-chain KYC-статус |
 | `POST` | `/api/whitelist/:wallet/revoke` | Отозвать KYC (Admin) |
@@ -89,8 +89,8 @@ Funding → Funded → Advanced → Repaid → (Investor Claims)
 | `POST` | `/api/invoices/:id/advance` | Авансировать 90% кредитору |
 | `POST` | `/api/invoices/:id/settle` | Settle инвойса (дебитор погасил) |
 | `POST` | `/api/invoices/:id/default` | Пометить инвойс как дефолтный |
-| `GET` | `/api/pools` | Получить оба пула |
-| `POST` | `/api/pools/initialize` | Инициализировать пул риска |
+| `GET` | `/api/pools` | Получить оба пула (Senior/Junior) |
+| `POST` | `/api/pools/initialize` | Инициализировать пул |
 | `GET` | `/api/edo/invoices` | Список мок-инвойсов ЭДО |
 | `POST` | `/api/edo/validate` | Валидация хэша документа |
 | `GET` | `/health` | Health check |
@@ -99,9 +99,11 @@ Funding → Funded → Advanced → Repaid → (Investor Claims)
 
 | Роль | Роуты | Функционал |
 |---|---|---|
-| **Investor** | `/investor` | Маркетплейс инвойсов, финансирование, портфель + claim |
+| **Investor** | `/investor` | Маркетплейс инвойсов, финансирование (Senior/Junior), портфель + claim |
 | **Creditor** | `/creditor` | Загрузка инвойсов, импорт из ЭДО, дашборд |
-| **Admin** | `/admin` | Статистика, управление инвойсами (advance/settle/default), управление пулами (Senior/Junior), KYC whitelist (просмотр + отзыв) |
+| **Admin** | `/admin` | Статистика, управление инвойсами (advance/settle/default), управление пулами, KYC whitelist (просмотр + отзыв) |
+
+Лендинг на `/` — общая страница с описанием платформы и кнопками навигации.
 
 ## Быстрый старт
 
@@ -133,71 +135,96 @@ cargo install --git https://github.com/coral-xyz/anchor --tag v0.31.0 anchor-cli
 yarn install
 ```
 
-### 1. Сборка и деплой
+### 1. Настройка Solana
 
 ```bash
-# Настройка Solana — используем shared devnet keypair из репо
+# Используем shared devnet keypair из репо — генерировать свой НЕ нужно
 solana config set --url devnet
 solana config set --keypair keys/devnet-authority.json
 solana airdrop 2    # нужен SOL для транзакций
+```
 
-# Сборка программы
+> **Keypair:** Devnet keypair оператора лежит в `keys/devnet-authority.json` (адрес `7oCPSDaLwJPAEFmM5H2W9YFENyN8t5z8yNL6NKEXGWAx`). Используется бэкендом и Anchor автоматически.
+
+### 2. Сборка и деплой (только при первом запуске / изменении контракта)
+
+```bash
 anchor build
+yarn copy-idl          # обязательно после каждого anchor build!
+anchor deploy          # обычно уже задеплоен, пропустить если не менял контракт
+```
 
-# Синхронизация IDL (обязательно после каждого anchor build!)
-yarn copy-idl
+### 3. Инициализация devnet
 
-# Деплой (обычно уже задеплоен — этот шаг только при первом деплое)
-anchor deploy
+```bash
+# ⚠️ Перед запуском — открой scripts/init-devnet.ts и вставь
+#    адрес своего Phantom кошелька в INVESTOR_WALLET_ADDRESS
+#    Скрипт выдаст 100K mock USDT на этот адрес.
 
-# ⚠️ Перед запуском — вставь адрес своего Phantom кошелька (инвестор) в:
-#   scripts/init-devnet.ts → INVESTOR_WALLET_ADDRESS
-# Скрипт выдаст 100K mock USDT на этот адрес для тестирования fund invoice.
 anchor run init-devnet
 ```
 
-> **Keypair:** Devnet keypair оператора лежит в `keys/devnet-authority.json` и используется бэкендом автоматически. Генерировать свой не нужно.
+Скрипт выполняет:
+1. Инициализация WhitelistRegistry (если нет)
+2. Инициализация пулов Senior (5%) и Junior (12%)
+3. Создание mock USDT mint с метаданными (Token-2022)
+4. Airdrop 100K USDT инвестору
+5. Mint 1M USDT authority (для settle операций)
+6. Автопатч `USDT_MINT` в `backend/.env` и `frontend/src/hooks/useInvoice.ts`
 
-> **Важно:** `Anchor.toml` → `[provider] cluster` должен быть `Devnet` для деплоя и `Localnet` для тестов. Переключать вручную перед каждой операцией.
+Состояние сохраняется в `.devnet-state.json` — при повторных запусках переиспользует существующий mint.
+
+### 4. Запуск
+
+```bash
+# Терминал 1: бэкенд
+cd backend
+cp .env.example .env   # только при первом запуске
+yarn dev               # http://localhost:4000
+
+# Терминал 2: фронтенд
+cd frontend
+yarn dev               # http://localhost:5173
+```
+
+> **Mock KYC:** Sumsub credentials в `.env.example` — плейсхолдеры. Без них KYC работает в mock-режиме: одобряется мгновенно, кошелёк добавляется в whitelist on-chain автоматически.
+
+### 5. Тесты
+
+14 Anchor-тестов: полный lifecycle факторинга.
+
+```bash
+# ⚠️ Переключить cluster в Anchor.toml на Localnet перед тестами!
+anchor test --provider.cluster localnet
+
+# Или если валидатор уже запущен
+anchor test --skip-local-validator
+```
 
 ### Troubleshooting
 
 <details>
-<summary><b>edition2024 is required / feature not stabilized in Cargo X.XX</b></summary>
+<summary><b>edition2024 is required / feature not stabilized</b></summary>
 
-`anchor build` использует встроенный Cargo из Solana platform-tools, а не системный. Если platform-tools < v1.52, его Cargo слишком старый для зависимостей с `edition = "2024"`.
-
-**Решение:**
+`anchor build` использует встроенный Cargo из Solana platform-tools. Если platform-tools < v1.52 — Cargo слишком старый.
 
 ```bash
-# 1. Обновить Agave (включает platform-tools v1.52+)
 agave-install init 3.1.11
-
-# 2. Очистить кэш cargo registry
 rm -rf ~/.cargo/registry/src/index.crates.io-*/toml_datetime-1.1.1*
-
-# 3. Пересобрать
 anchor build
 ```
-
-Проверить версию platform-tools: `cargo build-sbf --version` → должна быть v1.52+.
 </details>
 
 <details>
 <summary><b>anchor build зависает или падает по памяти</b></summary>
 
-Сборка Solana BPF-программ требует ~4GB RAM. На машинах с малым объёмом памяти:
-
 ```bash
-# Ограничить параллелизм
 CARGO_BUILD_JOBS=2 anchor build
 ```
 </details>
 
 <details>
-<summary><b>IDL not found / Account not found после билда</b></summary>
-
-IDL не синхронизирован с фронтендом/бэкендом:
+<summary><b>IDL not found / Account not found</b></summary>
 
 ```bash
 yarn copy-idl   # Копирует target/idl/rwa_token.json → frontend/src/idl/ + backend/src/idl/
@@ -205,92 +232,47 @@ yarn copy-idl   # Копирует target/idl/rwa_token.json → frontend/src/id
 </details>
 
 <details>
-<summary><b>Custom program error при деплое / тестах</b></summary>
+<summary><b>Program ID mismatch / Custom program error</b></summary>
 
-Program ID не совпадает. После первого деплоя обновить ID во всех 3 местах:
+После `anchor deploy` обновить Program ID в **4 местах**:
 - `Anchor.toml` → `[programs.devnet]` и `[programs.localnet]`
 - `backend/src/lib/solana.ts` → `PROGRAM_ID`
 - `frontend/src/hooks/useInvoice.ts` → `PROGRAM_ID`
+- `frontend/src/hooks/useInvestorPositions.ts` → `PROGRAM_ID`
 </details>
 
-После деплоя обновить Program ID в:
-- `Anchor.toml` → `[programs.devnet]`
-- `backend/src/lib/solana.ts` → `PROGRAM_ID`
-- `frontend/src/hooks/useInvoice.ts` → `PROGRAM_ID`
+<details>
+<summary><b>USDT_MINT mismatch после init-devnet</b></summary>
 
-### 2. Тесты
-
-14 Anchor-тестов: полный lifecycle факторинга.
-
-```bash
-# Запуск с локальным валидатором (рекомендуется)
-anchor test --provider.cluster localnet
-
-# Или если валидатор уже запущен
-anchor test --skip-local-validator
-```
-
-**Тестовые зависимости** (root `package.json` devDependencies):
-- `@coral-xyz/anchor`, `@solana/spl-token`, `@solana/web3.js` — Anchor SDK + Token-2022
-- `ts-mocha`, `mocha`, `chai` — тест-раннер + assertions
-- `@types/mocha`, `@types/chai`, `@types/bn.js` — TypeScript типы
-- `bn.js` — BigNumber для Anchor
-
-**Что покрывают тесты** (`tests/rwa-token.ts`):
-1. Инициализация whitelist registry
-2. Добавление кошелька в whitelist (KYC)
-3. Инициализация пулов (low-risk 5%+1%, high-risk 12%+3%)
-4. Создание mock USDT mint (Token-2022)
-5. Создание инвойса с Token-2022 mint
-6. Создание token accounts (USDT ATAs + invoice token ATA)
-7. Минт mock USDT инвестору
-8. Fund invoice — инвестор вносит USDT, получает invoice-токены
-9. Advance 90% кредитору
-10. Settle invoice — authority депозитит principal + interest
-11. Claim — инвестор сжигает токены, получает USDT
-12. Mark default на отдельном инвойсе
-13. Transfer hook отклоняет non-KYC кошелёк
-14. Transfer hook пропускает KYC-верифицированный кошелёк
-
-### 3. Бэкенд
-
-```bash
-cd backend
-cp .env.example .env
-# Keypair оператора берётся из keys/devnet-authority.json автоматически
-# Sumsub credentials — опционально, без них работает mock KYC
-yarn dev             # http://localhost:4000
-```
-
-### 4. Фронтенд
-
-```bash
-cd frontend
-yarn dev             # http://localhost:5173
-```
+`anchor run init-devnet` автоматически патчит USDT_MINT в backend/.env и frontend. Если что-то пошло не так — удали `usdtMint` из `.devnet-state.json` и перезапусти скрипт.
+</details>
 
 ## KYC-флоу
 
+**Реальный (Sumsub):**
 ```
-Пользователь подключает Phantom
-  → Фронтенд: POST /api/kyc/token { walletAddress }
-  → Бэкенд создаёт Sumsub applicant (externalUserId = wallet)
-  → Sumsub WebSDK запускается в браузере (паспорт + liveness)
-  → Sumsub webhook: applicantReviewed { reviewAnswer: GREEN }
-  → Бэкенд вызывает addToWhitelist on-chain → PDA whitelist_entry
-  → Transfer Hook проверяет whitelist при каждом трансфере
+Phantom → POST /api/kyc/token → Sumsub applicant → WebSDK (паспорт + liveness)
+→ Sumsub webhook (GREEN) → addToWhitelist on-chain → Transfer Hook enforcement
+```
+
+**Mock (devnet без Sumsub ключей):**
+```
+Phantom → POST /api/kyc/token → backend детектит placeholder credentials
+→ addToWhitelist on-chain напрямую → "KYC Approved (Mock Mode)"
 ```
 
 ## Демо-сценарий
 
-**Подготовка:** вставь адрес своего Phantom кошелька в `scripts/init-devnet.ts` → `INVESTOR_WALLET_ADDRESS`, затем запусти `anchor run init-devnet`. Скрипт выдаст 100K mock USDT на этот адрес.
+**Подготовка:** вставь адрес своего Phantom кошелька в `scripts/init-devnet.ts` → `INVESTOR_WALLET_ADDRESS`, затем запусти `anchor run init-devnet`. Скрипт выдаст 100K mock USDT.
 
-1. **Подключить кошелёк** — открыть `localhost:5173`, подключить Phantom
-2. **KYC** — нажать "Start KYC Verification" (mock режим — одобряется мгновенно)
-3. **Роль Creditor** — выбрать роль в хедере, импортировать инвойс из ЭДО или создать вручную
-4. **Роль Investor** — просмотреть маркетплейс, профинансировать инвойс USDT
-5. **Роль Admin** — авансировать 90% кредитору, затем подтвердить settle после оплаты дебитором
-6. **Роль Investor** — перейти в Портфель, получить возврат (principal + interest)
+1. **Открыть лендинг** — `localhost:5173`, подключить Phantom кошелёк
+2. **KYC** — нажать "KYC Required" в хедере (mock режим — одобряется мгновенно)
+3. **Роль Creditor** — переключить роль в хедере, импортировать инвойс из ЭДО или создать вручную
+4. **Роль Investor** — просмотреть маркетплейс, выбрать транш (Senior/Junior), профинансировать инвойс
+5. **Роль Admin** — авансировать 90% кредитору, затем подтвердить settle
+6. **Роль Investor** — перейти в Портфель, нажать "Claim Returns" (principal + interest)
+
+> **Фаусет:** Кнопка "Get USDT" в хедере выдаёт 10K mock USDT. Для больших сумм — `anchor run init-devnet`.
 
 ## Соответствие AIFC/AFSA
 
@@ -307,7 +289,7 @@ yarn dev             # http://localhost:5173
 | `anchor build` | Сборка программы |
 | `anchor test --provider.cluster localnet` | Запуск тестов (localnet) |
 | `anchor deploy` | Деплой на devnet |
-| `anchor run init-devnet` | Инициализация devnet (registry + пулы + mock USDT) |
+| `anchor run init-devnet` | Инициализация devnet (registry + пулы + mock USDT + faucet) |
 | `yarn copy-idl` | Копирование IDL в frontend и backend |
 | `yarn dev:backend` | Запуск бэкенда (localhost:4000) |
 | `yarn dev:frontend` | Запуск фронтенда (localhost:5173) |

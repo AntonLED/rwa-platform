@@ -3,6 +3,8 @@ import {
   Keypair,
   PublicKey,
   SystemProgram,
+  Transaction,
+  sendAndConfirmTransaction,
 } from "@solana/web3.js";
 import {
   AnchorProvider,
@@ -12,10 +14,22 @@ import {
 } from "@coral-xyz/anchor";
 import {
   TOKEN_2022_PROGRAM_ID,
-  createMint,
   getAssociatedTokenAddressSync,
   getOrCreateAssociatedTokenAccount,
+  ExtensionType,
+  getMintLen,
+  createInitializeMetadataPointerInstruction,
+  createInitializeMintInstruction,
+  createSetAuthorityInstruction,
+  AuthorityType,
+  TYPE_SIZE,
+  LENGTH_SIZE,
 } from "@solana/spl-token";
+import {
+  pack,
+  TokenMetadata,
+  createInitializeInstruction as createInitializeTokenMetadataInstruction,
+} from "@solana/spl-token-metadata";
 import * as fs from "fs";
 import * as path from "path";
 import bs58 from "bs58";
@@ -90,6 +104,71 @@ function getUsdtMint(): PublicKey {
   const mint = process.env.USDT_MINT;
   if (!mint) throw new Error("USDT_MINT not set");
   return new PublicKey(mint);
+}
+
+// ── Create Token-2022 mint with embedded metadata ─────────────────────────
+/**
+ * Create Token-2022 mint with embedded metadata (name, symbol, uri).
+ * If `finalMintAuthority` differs from payer, the mint is created with payer
+ * as authority (so it can sign metadata init), then authority is transferred.
+ * This is needed when finalMintAuthority is a PDA that cannot sign.
+ */
+export async function createMintWithMetadata(
+  connection: Connection,
+  payer: Keypair,
+  mintAuthority: PublicKey,
+  decimals: number,
+  name: string,
+  symbol: string,
+  uri: string = "",
+): Promise<Keypair> {
+  const mintKeypair = Keypair.generate();
+  const mint = mintKeypair.publicKey;
+  const needsTransfer = !mintAuthority.equals(payer.publicKey);
+
+  // Metadata init requires mintAuthority to sign, so use payer first
+  const initAuthority = payer.publicKey;
+
+  const metadata: TokenMetadata = {
+    mint, name, symbol, uri,
+    additionalMetadata: [],
+    updateAuthority: payer.publicKey,
+  };
+
+  const mintLen = getMintLen([ExtensionType.MetadataPointer]);
+  const metadataLen = TYPE_SIZE + LENGTH_SIZE + pack(metadata).length;
+  const lamports = await connection.getMinimumBalanceForRentExemption(mintLen + metadataLen);
+
+  const tx = new Transaction().add(
+    SystemProgram.createAccount({
+      fromPubkey: payer.publicKey,
+      newAccountPubkey: mint,
+      space: mintLen,
+      lamports,
+      programId: TOKEN_2022_PROGRAM_ID,
+    }),
+    createInitializeMetadataPointerInstruction(mint, payer.publicKey, mint, TOKEN_2022_PROGRAM_ID),
+    createInitializeMintInstruction(mint, decimals, initAuthority, null, TOKEN_2022_PROGRAM_ID),
+    createInitializeTokenMetadataInstruction({
+      programId: TOKEN_2022_PROGRAM_ID,
+      mint, metadata: mint,
+      name, symbol, uri,
+      mintAuthority: initAuthority,
+      updateAuthority: payer.publicKey,
+    }),
+  );
+
+  // Transfer mint authority to PDA if needed
+  if (needsTransfer) {
+    tx.add(
+      createSetAuthorityInstruction(
+        mint, payer.publicKey, AuthorityType.MintTokens, mintAuthority, [], TOKEN_2022_PROGRAM_ID,
+      ),
+    );
+  }
+
+  await sendAndConfirmTransaction(connection, tx, [payer, mintKeypair], { commitment: "confirmed" });
+  return mintKeypair;
 }
 
 // ── PDA helpers ────────────────────────────────────────────────────────────
@@ -241,17 +320,17 @@ export async function createInvoice(
   const backendKeypair = getBackendKeypair();
   const [invoicePDA] = getInvoicePDA(invoiceId);
 
-  // Create Token-2022 mint with invoice PDA as mint authority
-  const invoiceMint = await createMint(
+  // Create Token-2022 mint with metadata + invoice PDA as mint authority
+  const mintKeypair = await createMintWithMetadata(
     connection,
     backendKeypair,
     invoicePDA, // mint authority = invoice PDA
-    null, // no freeze authority
-    6, // INVOICE_TOKEN_DECIMALS
-    undefined,
-    { commitment: "confirmed" },
-    TOKEN_2022_PROGRAM_ID
+    6,
+    `RWA Invoice ${invoiceId}`,
+    `INV-${invoiceId.slice(0, 6).toUpperCase()}`,
+    "", // uri — could point to JSON metadata later
   );
+  const invoiceMint = mintKeypair.publicKey;
 
   const tx = await program.methods
     .createInvoice(

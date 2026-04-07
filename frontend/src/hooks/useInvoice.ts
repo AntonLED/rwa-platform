@@ -13,7 +13,7 @@ import idl from "../idl/rwa_token.json";
 const PROGRAM_ID = new PublicKey("J5zLwZs3qmKv69Xd2eGmvbGf8PuCtKD5bh22dm9iZHre");
 
 // Devnet USDT mint
-export const USDT_MINT = new PublicKey("GRE3zyQxjyuGchnoLZhS8p8YYNxg5TQtLf9GX2Y9yZ8D");
+export const USDT_MINT = new PublicKey("DYMTGLoPZun6XjDksi4FuRRKpPVqACbToD7p8k1tEYaq");
 // export const USDT_MINT = new PublicKey("JD2RSTTxd6YEqak253jD4sq8L15xjBV3oSm9DHHSywQg");
 
 const INVOICE_SEED = Buffer.from("invoice");

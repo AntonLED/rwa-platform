@@ -1,14 +1,24 @@
 import * as anchor from "@coral-xyz/anchor";
 import { Program } from "@coral-xyz/anchor";
 import { RwaToken } from "../target/types/rwa_token";
-import { PublicKey, SystemProgram } from "@solana/web3.js";
-import { 
-  TOKEN_2022_PROGRAM_ID, 
-  createMint, 
-  getMint, 
-  getOrCreateAssociatedTokenAccount, 
-  mintTo                             
+import { PublicKey, SystemProgram, Keypair, Transaction, sendAndConfirmTransaction } from "@solana/web3.js";
+import {
+  TOKEN_2022_PROGRAM_ID,
+  getMint,
+  getMintLen,
+  ExtensionType,
+  createInitializeMetadataPointerInstruction,
+  createInitializeMintInstruction,
+  TYPE_SIZE,
+  LENGTH_SIZE,
+  getOrCreateAssociatedTokenAccount,
+  mintTo
 } from "@solana/spl-token";
+import {
+  pack,
+  TokenMetadata,
+  createInitializeInstruction as createInitializeTokenMetadataInstruction,
+} from "@solana/spl-token-metadata";
 import * as fs from "fs";
 import * as path from "path";
 
@@ -26,6 +36,51 @@ interface DevnetState {
   registryPDA?: string;
   lowPoolPDA?: string;
   highPoolPDA?: string;
+}
+
+async function createMintWithMetadata(
+  connection: anchor.web3.Connection,
+  payer: Keypair,
+  mintAuthority: PublicKey,
+  decimals: number,
+  name: string,
+  symbol: string,
+  uri: string = "",
+): Promise<PublicKey> {
+  const mintKeypair = Keypair.generate();
+  const mint = mintKeypair.publicKey;
+
+  const metadata: TokenMetadata = {
+    mint, name, symbol, uri,
+    additionalMetadata: [],
+    updateAuthority: payer.publicKey,
+  };
+
+  const mintLen = getMintLen([ExtensionType.MetadataPointer]);
+  const metadataLen = TYPE_SIZE + LENGTH_SIZE + pack(metadata).length;
+  const lamports = await connection.getMinimumBalanceForRentExemption(mintLen + metadataLen);
+
+  const tx = new Transaction().add(
+    SystemProgram.createAccount({
+      fromPubkey: payer.publicKey,
+      newAccountPubkey: mint,
+      space: mintLen,
+      lamports,
+      programId: TOKEN_2022_PROGRAM_ID,
+    }),
+    createInitializeMetadataPointerInstruction(mint, payer.publicKey, mint, TOKEN_2022_PROGRAM_ID),
+    createInitializeMintInstruction(mint, decimals, mintAuthority, null, TOKEN_2022_PROGRAM_ID),
+    createInitializeTokenMetadataInstruction({
+      programId: TOKEN_2022_PROGRAM_ID,
+      mint, metadata: mint,
+      name, symbol, uri,
+      mintAuthority,
+      updateAuthority: payer.publicKey,
+    }),
+  );
+
+  await sendAndConfirmTransaction(connection, tx, [payer, mintKeypair], { commitment: "confirmed" });
+  return mint;
 }
 
 function loadState(): DevnetState {
@@ -144,27 +199,15 @@ async function main() {
       console.log("4. Mock USDT mint reused:", usdtMint.toBase58());
     } catch {
       console.log("4. Previous mint not found, creating new...");
-      usdtMint = await createMint(
-        connection,
-        (authority as any).payer,
-        authority.publicKey,
-        null,
-        6,
-        undefined,
-        { commitment: "confirmed" },
-        TOKEN_2022_PROGRAM_ID
+      usdtMint = await createMintWithMetadata(
+        connection, (authority as any).payer, authority.publicKey,
+        6, "RWA Mock USDT", "USDT",
       );
     }
   } else {
-    usdtMint = await createMint(
-      connection,
-      (authority as any).payer,
-      authority.publicKey,
-      null,
-      6,
-      undefined,
-      { commitment: "confirmed" },
-      TOKEN_2022_PROGRAM_ID
+    usdtMint = await createMintWithMetadata(
+      connection, (authority as any).payer, authority.publicKey,
+      6, "RWA Mock USDT", "USDT",
     );
     console.log("4. Mock USDT mint created:", usdtMint.toBase58());
   }
