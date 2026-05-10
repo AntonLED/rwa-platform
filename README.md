@@ -160,7 +160,7 @@ anchor build
 anchor run init-devnet
 
 # Start backend (Terminal 1)
-cd backend && cp .env.example .env && yarn dev
+cd backend && yarn dev
 
 # Start frontend (Terminal 2)
 cd frontend && yarn dev
@@ -178,7 +178,7 @@ anchor test --skip-local-validator
 
 ## Troubleshooting
 
-1. If you got an error in 7th step of `anchor run init-devnet` like `Authority faucet error` pls rerun `anchor run init-devnet` cause devnet is unstable. 
+1. If step 7 of `anchor run init-devnet` fails with `Authority faucet error`, just rerun `anchor run init-devnet` — devnet RPC is occasionally unstable and the script is idempotent.
 
 ---
 

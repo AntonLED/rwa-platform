@@ -1,77 +1,55 @@
-# RWA Platform — New Frontend
+# RWA Platform — Frontend
 
-## Что изменилось
+React 18 + Vite + React Router SPA for the open factoring platform on Solana. Three role-based portals (Investor / Supplier / Admin) selected via dropdown in the header (persisted in `localStorage`).
 
-### Дизайн-система (`src/index.css`)
-- Полный light/dark mode с переключателем 🌙/☀️ в хедере
-- CSS-переменные: цвета, радиусы, тени, шрифты, отступы
-- Компоненты: `.card`, `.btn`, `.badge`, `.input`, `.tabs`, `.stat-card`, `.progress-wrap`, `.table-wrap`, `.alert`, `.skeleton`, `.empty-state`
+## Stack
 
-### Header
-- SVG-логотип бренда
-- Role-switcher с эмодзи (Investor 📈 / Supplier 🏭 / Admin ⚙️)
-- KYC badge + theme toggle + WalletMultiButton
+- React 18, React Router 6, Vite 5, TypeScript 5
+- `@solana/wallet-adapter-react` + `@solana/wallet-adapter-react-ui` (Phantom, Solflare)
+- `@coral-xyz/anchor` 0.30.1 (pinned — root/backend use 0.31)
+- `@solana/web3.js`, `@solana/spl-token` (Token-2022)
 
-### Investor Portal (`/investor`)
-- Stat-карточки: TVL, APY, Duration, Network
-- Marketplace: карточки инвойсов с прогресс-баром, APY-блоком, таймером
-- InvoiceDetail: 2-колоночный лейаут, калькулятор дохода, защита от дефолта
-- Portfolio: сводка позиций + таблица с Claim Returns
+Connection: hardcoded `clusterApiUrl("devnet")` in `main.tsx`. `/api` proxied to `http://localhost:4000` via Vite dev proxy.
 
-### Supplier Portal (`/creditor`)
-- Stat-карточки: статусы инвойсов, TVL, Advance Received
-- SubmitInvoice: drag-and-drop upload + калькулятор аванса + пошаговый гайд
-- EDO Import: карточки с кнопкой Import →
+## Env
 
-### Admin Panel (`/admin`)
-- Overview: pipeline chart + compliance status
-- InvoiceManagement: таблица с кнопками Pay Advance / Mark Repaid / Default
-- PoolManagement: инициализация пулов
+- `VITE_USDT_MINT` — devnet USDT mint, auto-patched by `anchor run init-devnet`. Required (throws on import otherwise).
 
-## Установка
+## Routes
 
-```bash
-# Скопируй файлы из этого архива в свой проект
-# Убедись что в main.tsx есть: import "./index.css";
+- `/` — `Landing`
+- `/investor` — Marketplace, Portfolio (tabs)
+- `/investor/invoice/:id` — `InvoiceDetail` (fund flow)
+- `/creditor` — SubmitInvoice, EDO Import, own invoices
+- `/admin` — Overview, InvoiceManagement, PoolManagement, WhitelistManagement
 
-npm install
-npm run dev
-```
-
-## Структура
+## Source layout
 
 ```
 src/
-├── index.css                    ← Дизайн-система (НОВЫЙ)
-├── App.tsx                      ← Роутинг
-├── main.tsx                     ← Entrypoint с import "./index.css"
+├── main.tsx                  ConnectionProvider + WalletProvider, imports index.css
+├── App.tsx                   Router, Header + role routes
+├── index.css                 Design system: light/dark vars, .card .btn .badge .input .tabs .stat-card .progress-wrap .table-wrap .alert .skeleton .empty-state
+├── idl/rwa_token.json        Anchor IDL (synced via `yarn copy-idl`)
 ├── components/
-│   ├── KycOnboarding.tsx
-│   ├── shared/
-│   │   ├── Header.tsx           ← Новый хедер
-│   │   ├── StatusBadge.tsx
-│   │   ├── RiskBadge.tsx
-│   │   └── WalletStatus.tsx
-│   ├── investor/
-│   │   ├── InvestorDashboard.tsx
-│   │   ├── InvoiceMarketplace.tsx
-│   │   ├── InvoiceDetail.tsx
-│   │   └── Portfolio.tsx
-│   ├── creditor/
-│   │   ├── CreditorDashboard.tsx
-│   │   ├── SubmitInvoice.tsx
-│   │   └── EdoImport.tsx
-│   └── admin/
-│       ├── AdminDashboard.tsx
-│       ├── InvoiceManagement.tsx
-│       └── PoolManagement.tsx
+│   ├── Landing.tsx
+│   ├── KycOnboarding.tsx     Sumsub WebSDK gate
+│   ├── shared/               Header (role switcher, theme toggle, KYC badge, WalletMultiButton), StatusBadge, RiskBadge, WalletStatus
+│   ├── investor/             InvestorDashboard, InvoiceMarketplace, InvoiceDetail, Portfolio
+│   ├── creditor/             CreditorDashboard, SubmitInvoice, EdoImport
+│   └── admin/                AdminDashboard, InvoiceManagement, PoolManagement, WhitelistManagement
 └── hooks/
-    ├── useRole.ts
-    ├── useRefresh.ts
-    └── useWhitelist.ts
-    (useInvoice, usePool, useInvestorPositions — оставь свои оригинальные!)
+    ├── useInvoice.ts         Anchor program client; on-chain fundInvoice + claimReturns; backend-proxied advance/settle/default; invoice/whitelist fetch
+    ├── useInvestorPositions.ts  Reads InvestorPosition PDAs for connected wallet
+    ├── usePool.ts            Pool config fetch/init
+    ├── useWhitelist.ts       KYC entries (admin) + per-wallet status
+    ├── useRole.ts            Role state in localStorage
+    └── useRefresh.ts         Global event bus (emitRefresh / useRefreshListener) to refetch after on-chain actions
 ```
 
-## Важно
-Хуки `useInvoice.ts`, `usePool.ts`, `useInvestorPositions.ts` — **не трогал**, 
-оставь свои оригинальные файлы. Только UI переписан.
+## On-chain calls
+
+- User-signed via wallet adapter: `fund_invoice`, `claim` (Token-2022, `skipPreflight: true` to dodge devnet "Blockhash not found").
+- Backend-proxied (platform keypair): `POST /api/invoices/:id/{advance,settle,default}`.
+- All ATA derivations pass `TOKEN_2022_PROGRAM_ID`. Missing ATAs are created in `preInstructions`.
+- PDA seeds: `["invoice", id]`, `["investor", id, wallet]`, `["pool_config", trancheByte]`. Program ID hardcoded in `useInvoice.ts` and `useInvestorPositions.ts` — keep in sync with `Anchor.toml` and backend after redeploy.
